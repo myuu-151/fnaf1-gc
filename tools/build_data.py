@@ -64,14 +64,15 @@ BACKGROUNDS = {
 # Menu text in the texture atlases: (atlas, x, y, w, h). Stored at their size on a 640x480
 # screen (the menu is 1280x720 in the original).
 MENU_TEXT = {
-    "title": ("M0001", 4, 752, 202, 216),       # Five Nights at Freddy's
-    "newgame": ("M0004", 814, 878, 202, 40),
-    "continue": ("M0004", 813, 838, 204, 44),
-    "arrows": ("M0004", 944, 914, 54, 35),      # >>
-    "clock": ("M0005", 7, 720, 224, 37),        # 12:00 AM
+    # Rows are trimmed to the text: the atlas packs other sprites a few pixels above and below.
+    "title": ("M0001", 4, 762, 202, 212),       # Five Nights at Freddy's
+    "newgame": ("M0004", 814, 886, 202, 33),
+    "continue": ("M0004", 813, 848, 204, 34),
+    "arrows": ("M0004", 944, 923, 54, 26),      # >>
+    "clock": ("M0005", 7, 726, 224, 31),        # 12:00 AM
     "first": ("M0005", 471, 792, 72, 31),       # 1st
-    "night": ("M0005", 572, 780, 125, 42),      # Night
-    "copyright": ("M0002", 794, 993, 224, 21),  # (c)2014 Scott Cawthon
+    "night": ("M0005", 572, 792, 125, 31),      # Night
+    "copyright": ("M0002", 794, 1000, 224, 14), # (c)2014 Scott Cawthon
 }
 MENU_SCALE = (640 / 1280.0, 480 / 720.0)
 
