@@ -299,7 +299,7 @@ static ThreadFuncRet StreamReaderMain(void* arg)
         SYS_LockMutex(sStreamMutex);
         for (size_t i = 0; i < sStreamPlayers.size(); ++i)
         {
-            worked = sStreamPlayers[i]->ReaderStep(false) || worked;
+            worked = sStreamPlayers[i]->ReaderStep() || worked;
         }
         SYS_UnlockMutex(sStreamMutex);
 
@@ -312,16 +312,11 @@ static ThreadFuncRet StreamReaderMain(void* arg)
     THREAD_RETURN();
 }
 
-bool PcmPlayer::ReaderStep(bool mainThread)
+bool PcmPlayer::ReaderStep()
 {
-    // Disc boots (no own file) read on the main thread: the engine's whole-file DVD reads
-    // skip its ISO mutex, so a DVD read from this thread could overlap one and corrupt memory.
-    const bool ownFile = mFile != nullptr;
-    if (mainThread == ownFile)
-    {
-        return false;
-    }
-
+    // Disc boots (no own SD file) read through the engine here too. That needs the engine's
+    // whole-file DVD read to take its ISO mutex (local Octave change in System_Dolphin.cpp);
+    // without it a DVD read from this thread could overlap one on the main thread.
     if (!mWantRead || mReading || mReadyBytes != 0 || mReadFailed)
     {
         return false;
@@ -384,14 +379,14 @@ bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop,
 
     if (sizeBytes < 2)
     {
-        LogError("FNAF1: stream %s has no data", relPath.c_str());
+        OctLog("FNAF1: stream %s has no data (missing from the manifest?)", relPath.c_str());
         return false;
     }
 
     mStream = AUD_OpenStream(kStreamRate, 1);
     if (mStream == 0)
     {
-        LogError("FNAF1: no free audio stream for %s", relPath.c_str());
+        OctLog("FNAF1: no free audio stream for %s", relPath.c_str());
         return false;
     }
 
@@ -409,6 +404,7 @@ bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop,
     mSize = sizeBytes & ~1u;
     mQueuedFrames = 0;
     mLoop = loop;
+    mUnderrun = false;
     mOffset = 0;
     mReading = false;
     mReadFailed = false;
@@ -500,6 +496,14 @@ void PcmPlayer::Update()
     const uint64_t played = AUD_GetStreamPlayedFrames(mStream);
     const bool moreData = mLoop || mOffset < mSize;
 
+    // Everything queued has played but more is coming: the reader fell behind (a gap).
+    const bool underrun = moreData && mQueuedFrames > 0 && played >= mQueuedFrames;
+    if (underrun && !mUnderrun)
+    {
+        OctLog("FNAF1: stream underrun in %s at %.1f s", mPath.c_str(), played / 22050.0f);
+    }
+    mUnderrun = underrun;
+
     if (mReadFailed)
     {
         failed = true;
@@ -509,9 +513,6 @@ void PcmPlayer::Update()
         if (!mReading && mQueuedFrames < played + kStreamAheadFrames)
         {
             mWantRead = true;
-
-            // No SD file of its own: read here; it's queued on the next Update.
-            ReaderStep(true);
         }
     }
     else

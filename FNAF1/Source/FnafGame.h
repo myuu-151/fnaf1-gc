@@ -104,6 +104,7 @@ private:
     void StartNightIntro();
     void ShowMenuWidgets(bool menu, bool newspaper, bool intro);
     void PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y);
+    void UpdateGameOver(float deltaTime);
 
     void UpdatePlaying(float deltaTime);
     void UpdateInput(float deltaTime);
@@ -116,6 +117,8 @@ private:
     void MoveAnimatronic(Animatronic& a);
     void UpdateFoxy(float deltaTime);
     void FoxyArrive();
+    void StartPowerOut();
+    void UpdatePowerOut(float deltaTime);
     void StartJumpscare(const std::string& who);
     void SetLight(bool left, bool on);
     void ShowMessage(const std::string& message);
@@ -152,6 +155,11 @@ private:
     PcmPlayer mCheer;
     PcmPlayer mMenuMusic;
     PcmPlayer mMenuHum;
+    PcmPlayer mEerie;           // eerie ambience, louder as the animatronics get close
+    PcmPlayer mBreath;          // breathing when someone gets into the office
+    float mEerieVolume = 0.0f;
+    float mAmbienceVolume = 0.0f;
+    int32_t mAmbienceTrack = 0;     // what mAmbience plays: 0 = dark ambience (idle), 1 = ambience2 (close)
     // The engine runs at most 4 streams: the night has call, ambience, fan and rare music;
     // StopStreams() clears them before the power-out (music box, laugh) and 6 AM (chimes, cheer).
 
@@ -211,6 +219,9 @@ private:
     int32_t mMenuSelection = 0;         // 0 = New Game, 1 = Continue
     float mMenuTimer = 0.0f;
     float mMenuFrameTimer = 0.0f;
+    Quad* mGameOverText = nullptr;
+    Sprite mGameOverSprite;
+    float mGameOverTimer = 0.0f;
     float mScreenWidth = 640.0f;
     float mScreenHeight = 480.0f;
 
@@ -252,6 +263,12 @@ private:
     int32_t mStaticFrame = 0;
     float mFanTime = 0.0f;
     float mPowerOutTimer = 0.0f;
+    int32_t mPowerOutPhase = 0;     // 0 dark, 1 music box + Freddy's face, 2 pitch black
+    float mPowerOutPhaseTimer = 0.0f;
+    float mPowerOutRollTimer = 0.0f;
+    float mFreddyFlickerTimer = 0.0f;
+    bool mFreddyFaceOn = false;
+    float mStaticAlpha = 0.35f;     // camera static opacity between switch bursts
     std::string mJumpWho;
     int32_t mJumpFrame = 0;
     float mJumpTimer = 0.0f;

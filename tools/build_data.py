@@ -12,6 +12,7 @@ along there:
 Then package with Octave: Octave.exe -headless -project FNAF1/FNAF1.octp -build GameCube
 """
 
+import math
 import os
 import struct
 import subprocess
@@ -37,7 +38,9 @@ FLIP_SIZE = (256, 144)
 BACKGROUNDS = {
     # office (lights: one side at a time)
     "office": 39, "office_light_l": 58, "office_light_r": 127,
-    "office_bonnie": 225, "office_chica": 227, "office_dark": 521,
+    "office_bonnie": 225, "office_chica": 227,
+    # power out: dark office, and Freddy's face lit in the left doorway (flickers with the music box)
+    "office_dark": 304, "office_freddy_dark": 305,
     # cameras
     # Show Stage: 19 = normal pose (2 is the rare everyone-stares frame); alone, Freddy faces forward (224; 355 is him staring).
     "cam1a_all": 19, "cam1a_no_bonnie": 68, "cam1a_no_chica": 223, "cam1a_freddy": 224,
@@ -59,6 +62,7 @@ BACKGROUNDS = {
     # main menu: Freddy's face (431 normal, 440/441 twitches, 442 the endoskeleton glitch)
     "menu_freddy0": 431, "menu_freddy1": 440, "menu_freddy2": 441, "menu_freddy3": 442,
     "newspaper": 539,               # help-wanted ad shown on New Game
+    "gameover": 358,                # after the static: Freddy in the backstage room
 }
 
 # Menu text in the texture atlases: (atlas, x, y, w, h). Stored at their size on a 640x480
@@ -73,14 +77,17 @@ MENU_TEXT = {
     "first": ("M0005", 471, 792, 72, 31),       # 1st
     "night": ("M0005", 572, 792, 125, 31),      # Night
     "copyright": ("M0002", 794, 1000, 224, 14), # (c)2014 Scott Cawthon
+    "gameover": ("M0004", 224, 972, 206, 34),   # Game Over
 }
 MENU_SCALE = (640 / 1280.0, 480 / 720.0)
 
+# Frame lists copied from the animations in Application.ccj (u16 image numbers, in playback
+# order; the file numbering interleaves animations, so it isn't the order).
 JUMPSCARES = {
-    "bonnie": [291] + list(range(293, 302)) + [303],
-    "chica": list(range(228, 238)) + [239],
-    "freddy": list(range(485, 519, 2)),
-    "foxy": [413, 242, 243] + list(range(396, 413)),     # lunging in from the left doorway
+    "bonnie": [301, 291, 303] + list(range(293, 301)),
+    "chica": [279, 65, 281, 69, 216] + list(range(228, 238)) + [239],
+    "freddy": list(range(308, 326)),    # power-out: lunging out of the dark (1280x720, drawn full screen)
+    "foxy": [413, 242, 415, 243] + list(range(396, 413)) + [412] * 4,     # lunging in from the left doorway, then holds
 }
 # Foxy running down the West Hall (CAM 2A), far to past the camera.
 # Every West Hall frame with Foxy (found by matching the hall's poster wall); the
@@ -98,7 +105,6 @@ SOUNDS = {
     "scream": (15, None),        # XSCREAM
     "windowscare": (31, None),
     "steps": (9, None),          # deep steps
-    "powerdown": (26, 6.0),
     "run": (55, None),           # running fast3
     "knock": (39, None),         # DOOR_POUNDING_ME: Foxy banging on the left door
     "honk": (36, None),          # PartyFavorraspyPart_AC01__3: Freddy poster's nose
@@ -110,12 +116,21 @@ SOUNDS = {
     "pots1": (16, None),         # OVEN-DRA: Chica in the kitchen
     "pots2": (17, None),
     "pots3": (19, None),
+    "error": (4, None),          # error: door/light buttons while someone is in the office
 }
 
 # Long sounds, streamed from the disc at runtime instead of loaded into RAM.
 STREAMS = {
     "call": (41, None),          # voiceover1c: the night 1 phone call
-    "ambience": (28, None),      # ambience2
+    "ambience": (28, None),      # ambience2: replaces the dark ambience when the power runs out
+    "eerie": (37, None),         # EerieAmbienceLargeSca: loops all night, volume rises as they get close
+    "darkambience": (0, None),   # ColdPresc B: loops from the start of the night
+    "powerdown": (26, None),     # power out: 18.7 s, winds down until the music box
+    "breath1": (22, None),       # Vocals_Breaths: someone got into the office
+    "breath2": (23, None),
+    "breath3": (24, None),
+    "breath4": (25, None),
+    "deadstatic": (20, None),    # static: the game over screen
     "musicbox": (30, None),      # music box (power out)
     "menumusic": (35, None),     # darkness music (main menu)
     "menustatic": (34, None),    # static2 (main menu)
@@ -288,6 +303,26 @@ def build_menu_text():
     print("menu text: %d sprites" % len(MENU_TEXT))
 
 
+# Looping sounds whose recordings don't join up (the fan's 9.6 s hum jumps back audibly).
+# Their last N seconds are crossfaded into the start so the loop is seamless.
+LOOP_CROSSFADE = {"fan": 0.75, "light": 0.5, "camhum": 0.5, "menustatic": 0.75}
+
+
+def crossfade_loop(path, seconds):
+    with open(path, "rb") as f:
+        samples = list(struct.unpack("<%dh" % (os.path.getsize(path) // 2), f.read()))
+    fade = min(int(seconds * 22050), len(samples) // 3)
+    body = samples[:len(samples) - fade]
+    tail = samples[len(samples) - fade:]
+    # Equal-power curve: these hums are noise-like, so a linear blend would dip ~3 dB in
+    # the middle; sin/cos weights keep the loudness steady through the join.
+    for i in range(fade):
+        t = i / float(fade) * math.pi / 2.0
+        body[i] = int(max(-32768, min(32767, round(body[i] * math.sin(t) + tail[i] * math.cos(t)))))
+    with open(path, "wb") as f:
+        f.write(struct.pack("<%dh" % len(body), *body))
+
+
 def build_sounds(table):
     sizes = {}
     for name, (number, max_seconds) in table.items():
@@ -298,6 +333,8 @@ def build_sounds(table):
             cmd += ["-t", str(max_seconds)]
         cmd += ["-f", "s16le", dst]
         subprocess.run(cmd, check=True)
+        if name in LOOP_CROSSFADE:
+            crossfade_loop(dst, LOOP_CROSSFADE[name])
         sizes[name] = os.path.getsize(dst)
         print("sound %s: %d KB" % (name, sizes[name] // 1024))
     return sizes

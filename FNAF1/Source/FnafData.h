@@ -68,10 +68,8 @@ public:
     void SetVolume(float volume);
     bool IsPlaying() const;
 
-    // With the stream mutex held: reads the next chunk if one is wanted. The reader thread
-    // handles players with their own SD file; the main thread handles the rest (disc boots),
-    // because the engine's whole-file disc reads aren't locked against other threads.
-    bool ReaderStep(bool mainThread);
+    // Reader thread only, with the stream mutex held: reads the next chunk if one is wanted.
+    bool ReaderStep();
 
 private:
 
@@ -82,6 +80,7 @@ private:
     uint32_t mSize = 0;
     uint64_t mQueuedFrames = 0;
     bool mLoop = false;
+    bool mUnderrun = false;         // logged once per gap
 
     uint32_t mOffset = 0;           // next byte the reader reads
     bool mWantRead = false;         // main thread wants another chunk

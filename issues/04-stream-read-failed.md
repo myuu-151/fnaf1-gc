@@ -12,12 +12,18 @@ FNAF1: stream read failed for snd/call.pcm
 
 The sound stops when its read fails.
 
-## Why it could happen
+## How streams read
 
-On an SD boot, streamed sounds read `FNAF1.iso` through their own file handles on the background thread (`PcmPlayer::ReaderStep` in `FNAF1/Source/FnafData.cpp`), while the engine reads the same ISO on the main thread. libfat serializes access to the card, so this is expected to work, but it hasn't been tested on hardware yet.
+All streamed sounds read on a low-priority background thread (`PcmPlayer::ReaderStep` in `FNAF1/Source/FnafData.cpp`):
 
-## Related: the Dolphin crash
+- **SD boot:** each stream reads `FNAF1.iso` through its own file handle, while the engine reads the same ISO on the main thread. libfat serializes access to the card.
+- **Disc boot (Dolphin, or a real disc):** streams read through the engine's disc reader, which the main thread also uses for pictures.
 
-The first background-thread build crashed in Dolphin inside `malloc`, when loading a camera picture. In Dolphin the ISO is read as a disc, so the thread went through the engine's DVD reader. The engine's whole-file DVD read (`OctDvdReadAligned` in `System_Dolphin.cpp`) doesn't take the ISO mutex, so it could overlap with a thread read and write past a buffer.
+## The Dolphin crash, and the engine change it needs
 
-Fixed in the game: on disc boots (no own SD handle), streams read on the main thread. The underlying engine bug is still there. It could also affect the engine's own async loading and video streaming on disc boots, and the fix would be taking the ISO mutex around that read.
+The first background-thread build crashed in Dolphin inside `malloc`, while loading a camera picture. The engine's whole-file DVD read (`OctDvdReadAligned` in `SYS_AcquireFileData`, `System_Dolphin.cpp`) didn't take the ISO mutex, so a thread read could overlap it and write past a buffer.
+
+- **First workaround:** disc boots read streams on the main thread. That stopped the crash but made Dolphin stutter, both audio and picture.
+- **Current fix:** the engine's whole-file DVD read now takes the ISO mutex, and disc boots use the background thread again.
+
+The mutex fix is in Octave-libogc commit `99db4e5`. Building this game against an older engine can bring the crash back on disc boots.

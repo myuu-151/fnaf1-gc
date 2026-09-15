@@ -20,8 +20,10 @@ A private, personal port of Five Nights at Freddy's (all credit to Scott Cawthon
 
 Requirements:
 - devkitPro with devkitPPC
-- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built. Use commit `73155d6` or later. That commit makes the SD Gecko driver write at 13.5 MHz; before it, writes at 27 MHz corrupted files on passive SD adapters.
-- An `Octave.exe` whose packager builds a project's own `Source/` + `Makefile_GCN`. This is a local change in `ActionManager.cpp` (`BuildData`), marked `LOCAL FNAF1` and not in the Octave repo. Without it the packager compiles Octave's Standalone game instead.
+- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built and `Octave.exe` rebuilt. Use commit `99db4e5` or later:
+  - `73155d6` makes the SD Gecko driver write at 13.5 MHz; before it, writes at 27 MHz corrupted files on passive SD adapters.
+  - `99db4e5` makes the packager build a project's own `Source/` + `Makefile_GCN` (without it, it compiles Octave's Standalone game), and locks the engine's whole-file disc reads (without it, disc boots such as Dolphin can crash, see `issues/04`).
+  - **Not in the Octave repo yet:** `AUD_MAX_PCM_STREAMS` in `Engine/Source/Audio/Dolphin/Audio_Dolphin.cpp` raised from 4 to 6. A night streams up to 6 sounds at once (call, fan, ambience, eerie ambience, rare music, breathing); with 4, some won't start.
 - Python 3 with Pillow
 - ffmpeg (the script uses Octave's `External/ffmpeg/bin/ffmpeg.exe`, or `OCTAVE_FFMPEG`)
 
@@ -61,7 +63,10 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 | D-pad left / right (tablet up) | Switch camera |
 | B | Mute the phone call |
 | Z (tablet down) | Honk the Freddy poster's nose |
-| Start | Restart after a game over or 6 AM |
+| A or START (game over / 6 AM) | Back to the main menu |
+| X | Debug: power out now |
+| Y | Debug: Bonnie's jumpscare |
+| D-pad down | Debug: Chica's jumpscare |
 
 ## What the prototype has
 

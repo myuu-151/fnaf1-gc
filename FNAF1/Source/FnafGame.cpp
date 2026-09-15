@@ -43,7 +43,7 @@ static constexpr uint64_t kLoadBudgetUs = 30000;  // loading work per frame
 // Prototype difficulty: a bit above the original Night 1 so things happen.
 static constexpr int32_t kBonnieBaseAi = 3;
 static constexpr int32_t kChicaBaseAi = 3;
-static constexpr int32_t kFoxyBaseAi = 2;
+static constexpr int32_t kFoxyBaseAi = 5;      // rolls 1..20 every 5 s; raised from 2 for a livelier night 1
 
 // Rare camera pictures (the original rolls a "random for pic" counter): Freddy staring on
 // the Show Stage, and rare posters on empty cameras. Rolled when the tablet goes up or the
@@ -55,6 +55,8 @@ static constexpr int32_t kRarePicOdds = 20;
 static constexpr float kMenuFrameSeconds = 0.08f;   // Freddy's face frame and flicker
 static constexpr float kNewspaperSeconds = 5.0f;    // help-wanted ad after New Game
 static constexpr float kNightIntroSeconds = 2.5f;   // "12:00 AM / 1st Night"
+static constexpr float kGameOverStaticSeconds = 10.8f;  // static before the game over screen (the static sound's length)
+static constexpr float kGameOverSeconds = 10.0f;        // game over screen, then the menu
 
 // Foxy
 static constexpr float kFoxyMoveInterval = 5.01f;
@@ -83,8 +85,8 @@ static const CameraInfo kCameras[kNumCameras] = {
 };
 
 static const char* kSoundNames[] = {
-    "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "powerdown", "run", "knock", "honk",
-    "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3",
+    "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "run", "knock", "honk",
+    "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3", "error",
 };
 
 // SD diagnostic log (Octave System_Dolphin.cpp; writes /octiso.log when the local logger is enabled).
@@ -160,7 +162,7 @@ void FnafGame::QueueLoadJobs()
     // the disc and are read when shown (see ShowImage), to keep RAM free for the sounds.
     // The office pictures (~300 KB, swapped every time the lights flash) and the static
     // frames, which animate all the time, are kept in RAM.
-    for (const char* office : { "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark" })
+    for (const char* office : { "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark", "office_freddy_dark" })
     {
         queueImage(office);
     }
@@ -179,6 +181,7 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_clock.rgx", &mIntroClockSprite);
     queueSprite("spr/menu_first.rgx", &mIntroFirstSprite);
     queueSprite("spr/menu_night.rgx", &mIntroNightSprite);
+    queueSprite("spr/menu_gameover.rgx", &mGameOverSprite);
 
     for (int32_t i = 0; i < mCounts["static"]; ++i)
     {
@@ -446,7 +449,15 @@ void FnafGame::StartNight()
 
     mFanSound.Start("snd/fan.pcm", (uint32_t)mCounts["size_fan"], true, 0.6f);
 
-    mAmbience.Start("snd/ambience.pcm", (uint32_t)mCounts["size_ambience"], true, 0.35f);
+    // The original starts the dark ambience looping with the fan. (Its robotvoice sound also
+    // starts there, but it's heard only when the animatronics glitch on the cameras.)
+    mAmbience.Start("snd/darkambience.pcm", (uint32_t)mCounts["size_darkambience"], true, 0.5f);   // channel volume 50
+
+    // Eerie ambience loops from the start too, silent until the animatronics close in.
+    mAmbienceVolume = 0.5f;
+    mAmbienceTrack = 0;
+    mEerieVolume = 0.0f;
+    mEerie.Start("snd/eerie.pcm", (uint32_t)mCounts["size_eerie"], true, 0.0f);
     mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 1.0f);
     mCameraFresh = true;
     mPotsTimer = 3.0f;
@@ -486,6 +497,8 @@ void FnafGame::Update(float deltaTime)
     mCheer.Update();
     mMenuMusic.Update();
     mMenuHum.Update();
+    mEerie.Update();
+    mBreath.Update();
     const uint64_t streamUs = SYS_GetTimeMicroseconds() - streamStart;
 
     // Timing summary every 5 s: average and worst frame, and time spent reading streams.
@@ -526,6 +539,9 @@ void FnafGame::Update(float deltaTime)
         break;
 
     case State::GameOver:
+        UpdateGameOver(deltaTime);
+        break;
+
     case State::Win:
         if (mCheerTimer > 0.0f)
         {
@@ -562,6 +578,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
     if (hour != mHour)
     {
         mHour = hour;
+
         if (mHour >= 6)
         {
             AudioManager::StopAllSounds();
@@ -577,17 +594,24 @@ void FnafGame::UpdatePlaying(float deltaTime)
 
     if (mState == State::PowerOut)
     {
-        mPowerOutTimer += deltaTime;
-        if (mPowerOutTimer > 7.0f && !mLaughed)
-        {
-            mLaughed = true;
-            mMusicBox.Stop();
-            mJingle.Start("snd/laugh.pcm", (uint32_t)mCounts["size_laugh"], false, 1.0f);
-        }
-        if (mPowerOutTimer > 10.0f)
-        {
-            StartJumpscare("freddy");
-        }
+        UpdatePowerOut(deltaTime);
+        return;
+    }
+
+    // Debug keys: X = power out, Y = Bonnie's jumpscare, D-pad down = Chica's.
+    if (Pressed(GAMEPAD_X))
+    {
+        StartPowerOut();
+        return;
+    }
+    if (Pressed(GAMEPAD_Y))
+    {
+        StartJumpscare("bonnie");
+        return;
+    }
+    if (Pressed(GAMEPAD_DOWN))
+    {
+        StartJumpscare("chica");
         return;
     }
 
@@ -639,7 +663,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
         mCircusTimer += 5.0f;
         if ((rand() % 30) == 0 && !mRareMusic.IsPlaying())
         {
-            mRareMusic.Start("snd/circus.pcm", (uint32_t)mCounts["size_circus"], false, 0.4f);
+            mRareMusic.Start("snd/circus.pcm", (uint32_t)mCounts["size_circus"], false, 0.15f);   // faint, far away
             mRareMusicIsPirate = false;
         }
     }
@@ -655,6 +679,56 @@ void FnafGame::UpdatePlaying(float deltaTime)
         }
     }
 
+    // Ambience in three layers:
+    //   idle   - every animatronic in place (Bonnie and Chica on the stage, Foxy behind the
+    //            curtain): the dark ambience
+    //   moving - someone has left, but isn't near: the eerie ambience
+    //   close  - someone in a hall, corner, doorway or the office, or Foxy out of the cove:
+    //            ambience2
+    // The dark ambience and ambience2 share one stream (the original plays them on one channel).
+    auto isClose = [](const Animatronic& a)
+    {
+        switch (a.mRoom)
+        {
+        case Room::WestHall:
+        case Room::EastHall:
+        case Room::WestCorner:
+        case Room::EastCorner:
+        case Room::LeftDoor:
+        case Room::RightDoor:
+        case Room::Office:       return true;
+        default:                 return false;
+        }
+    };
+    const bool anyActive = mBonnie.mRoom != Room::ShowStage || mChica.mRoom != Room::ShowStage ||
+                           mFoxyStage > 0 || mFoxyRunning;
+    const bool anyClose = isClose(mBonnie) || isClose(mChica) || mFoxyStage >= 2 || mFoxyRunning;
+
+    const int32_t track = anyClose ? 1 : 0;     // 0 = dark ambience, 1 = ambience2
+    if (track != mAmbienceTrack)
+    {
+        mAmbienceTrack = track;
+        mAmbienceVolume = -1.0f;                // set below
+        if (track == 1)
+            mAmbience.Start("snd/ambience.pcm", (uint32_t)mCounts["size_ambience"], true, 0.0f);
+        else
+            mAmbience.Start("snd/darkambience.pcm", (uint32_t)mCounts["size_darkambience"], true, 0.0f);
+    }
+
+    const float ambienceVolume = anyClose ? 0.6f : (anyActive ? 0.0f : 0.5f);
+    const float eerieVolume = (anyActive && !anyClose) ? 0.5f : 0.0f;
+
+    if (eerieVolume != mEerieVolume)
+    {
+        mEerieVolume = eerieVolume;
+        mEerie.SetVolume(eerieVolume);
+    }
+    if (ambienceVolume != mAmbienceVolume)
+    {
+        mAmbienceVolume = ambienceVolume;
+        mAmbience.SetVolume(ambienceVolume);
+    }
+
     // Power: each thing in use adds a bar.
     mUsage = 1;
     for (const Door& door : mDoors)
@@ -667,19 +741,118 @@ void FnafGame::UpdatePlaying(float deltaTime)
     mPower -= deltaTime * 0.1f * mUsage;
     if (mPower <= 0.0f)
     {
-        mPower = 0.0f;
-        mState = State::PowerOut;
-        mTabletUp = false;
-        for (Door& door : mDoors)
+        StartPowerOut();
+    }
+}
+
+void FnafGame::StartPowerOut()
+{
+    mPower = 0.0f;
+    mState = State::PowerOut;
+    mTabletUp = false;
+    mTabletProgress = 0.0f;
+
+    bool doorWasClosed = false;
+    for (Door& door : mDoors)
+    {
+        doorWasClosed = doorWasClosed || door.mClosed;
+        door.mClosed = false;
+        door.mLight = false;
+    }
+
+    AudioManager::StopAllSounds();
+    StopStreams();
+    mJingle.Start("snd/powerdown.pcm", (uint32_t)mCounts["size_powerdown"], false, 1.0f);
+
+    // The original switches its ambience channel to ambience2 (volume 50) when the power runs out.
+    mAmbience.Start("snd/ambience.pcm", (uint32_t)mCounts["size_ambience"], true, 0.5f);
+    if (doorWasClosed)
+    {
+        PlaySound("door");
+    }
+
+    mPowerOutPhase = 0;
+    mPowerOutTimer = 0.0f;
+    mPowerOutPhaseTimer = 0.0f;
+    mPowerOutRollTimer = 0.0f;
+    mFreddyFaceOn = false;
+    mFreddyFlickerTimer = 0.0f;
+    OctLog("FNAF1: power out");
+}
+
+void FnafGame::UpdatePowerOut(float deltaTime)
+{
+    // Power-out, as in the original: the office goes dark and the doors open; after a while
+    // Freddy's face flickers in the left doorway to the music box; the music stops, it goes
+    // pitch black with footsteps, and he attacks. Each step rolls a chance every few seconds,
+    // with a cap (timings are estimates, not decoded from the original's events).
+    mPowerOutTimer += deltaTime;
+    mPowerOutPhaseTimer += deltaTime;
+    mPowerOutRollTimer += deltaTime;
+
+    for (Door& door : mDoors)
+    {
+        door.mProgress = glm::max(0.0f, door.mProgress - deltaTime * kDoorSpeed);
+    }
+
+    // You can still look around (Freddy's face is in the left doorway).
+    const float stick = INP_GetGamepadAxisValue(GAMEPAD_AXIS_LTHUMB_X, 0);
+    if (fabs(stick) > 0.2f)
+    {
+        mOfficePan = glm::clamp(mOfficePan + stick * kPanSpeed * deltaTime, 0.0f, 1.0f);
+    }
+
+    auto roll = [this](float interval, int32_t odds, float cap)
+    {
+        if (mPowerOutPhaseTimer >= cap)
         {
-            door.mClosed = false;
-            door.mLight = false;
+            return true;
         }
-        AudioManager::StopAllSounds();
-        StopStreams();
-        PlaySound("powerdown");
-        mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], false, 0.8f);
-        mLaughed = false;
+        if (mPowerOutRollTimer >= interval)
+        {
+            mPowerOutRollTimer -= interval;
+            return (rand() % odds) == 0;
+        }
+        return false;
+    };
+
+    switch (mPowerOutPhase)
+    {
+    case 0:     // dark office, waiting for Freddy
+        // The power-down sound winds down, then the music box starts right away.
+        if (!mJingle.IsPlaying())
+        {
+            mPowerOutPhase = 1;
+            mPowerOutPhaseTimer = 0.0f;
+            mPowerOutRollTimer = 0.0f;
+            mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], true, 0.8f);
+        }
+        break;
+
+    case 1:     // music box: his face flickers in the left doorway
+        mFreddyFlickerTimer -= deltaTime;
+        if (mFreddyFlickerTimer <= 0.0f)
+        {
+            mFreddyFaceOn = (rand() % 100) < 60;
+            mFreddyFlickerTimer = 0.05f + (rand() % 20) / 100.0f;
+        }
+        if (roll(5.0f, 5, 20.0f))
+        {
+            mPowerOutPhase = 2;
+            mPowerOutPhaseTimer = 0.0f;
+            mPowerOutRollTimer = 0.0f;
+            mFreddyFaceOn = false;
+            mMusicBox.Stop();
+            PlaySound("steps", false, 0.8f);
+        }
+        break;
+
+    default:    // pitch black, footsteps, then the jumpscare
+        if (roll(2.0f, 5, 10.0f))
+        {
+            StartJumpscare("freddy");
+        }
+        break;
     }
 }
 
@@ -755,6 +928,11 @@ void FnafGame::UpdateInput(float deltaTime)
     // someone is inside the office.
     if (intruder)
     {
+        // The buttons are dead: they just buzz.
+        if (Pressed(GAMEPAD_L1) || Pressed(GAMEPAD_R1) || Pressed(GAMEPAD_LEFT) || Pressed(GAMEPAD_RIGHT))
+        {
+            PlaySound("error");
+        }
         return;
     }
 
@@ -906,9 +1084,34 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
     {
         a.mSeenAtDoor = false;
         a.mOfficeTimer = 0.0f;
-        if (a.mRoom == Room::LeftDoor || a.mRoom == Room::RightDoor || a.mRoom == Room::Office)
+        // Footsteps as they close in, louder the nearer they get (the original plays its
+        // "deep steps" at 10-40% depending on where they are).
+        float steps = 0.0f;
+        switch (a.mRoom)
         {
-            PlaySound("steps", false, 0.7f);
+        case Room::WestHall:
+        case Room::EastHall:     steps = 0.25f; break;
+        case Room::WestCorner:
+        case Room::EastCorner:   steps = 0.35f; break;
+        case Room::LeftDoor:
+        case Room::RightDoor:
+        case Room::Office:       steps = 0.5f; break;
+        default:                 break;
+        }
+        if (steps > 0.0f)
+        {
+            PlaySound("steps", false, steps);
+        }
+
+        // They're in: one of the original's four breathing sounds.
+        if (a.mRoom == Room::Office)
+        {
+            const int32_t breath = (rand() % 4) + 1;
+            char path[32];
+            char key[32];
+            snprintf(path, sizeof(path), "snd/breath%d.pcm", breath);
+            snprintf(key, sizeof(key), "size_breath%d", breath);
+            mBreath.Start(path, (uint32_t)mCounts[key], false, 0.8f);
         }
         LogDebug("FNAF1: %s moved to room %d", a.mName, (int)a.mRoom);
     }
@@ -1043,8 +1246,16 @@ void FnafGame::StartJumpscare(const std::string& who)
     mTabletUp = false;
     mTabletProgress = 0.0f;
     mJumpWho = who;
-    mJumpFrame = -1;
-    mJumpTimer = kJumpFrameSeconds;
+    mJumpFrame = 0;
+    mJumpTimer = 0.0f;
+
+    // Load the first frame before showing the jumpscare: the canvas is shared with the menu,
+    // newspaper and game over screen, and its old picture would flash for a frame.
+    char name[64];
+    snprintf(name, sizeof(name), "jump_%s_00", who.c_str());
+    std::string shown;
+    ShowImage(mJumpCanvas, name, shown);
+    mMenuShown.clear();
     mJump->SetVisible(true);
 }
 
@@ -1064,16 +1275,24 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     }
     else if (mJumpFrame + 1 >= frames && mJumpTimer > 0.6f)
     {
+        // Game over: full-screen static with its sound, then the game over screen.
         mJump->SetVisible(false);
+        AudioManager::StopAllSounds();      // the scream ends with the animation
         mState = State::GameOver;
-        ShowMessage("GAME OVER\nPress START");
+        mGameOverTimer = 0.0f;
+        mMenuShown.clear();
+        ShowMenuWidgets(false, false, false);
+        mMenuBlack->SetVisible(true);
+        mMenuStaticQuad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        mMenuStaticQuad->SetVisible(true);
+        mJingle.Start("snd/deadstatic.pcm", (uint32_t)mCounts["size_deadstatic"], false, 1.0f);
     }
 }
 
 std::string FnafGame::GetOfficeImage() const
 {
     if (mState == State::PowerOut)
-        return "office_dark";
+        return (mPowerOutPhase == 1 && mFreddyFaceOn) ? "office_freddy_dark" : "office_dark";
 
     if (mDoors[0].mLight)
         return IsAt(mBonnie, Room::LeftDoor) ? "office_bonnie" : "office_light_l";
@@ -1224,7 +1443,8 @@ void FnafGame::UpdateView(float deltaTime)
     const std::string cameraImage = cameraOn ? GetCameraImage(room) : "";
 
     mCamera->SetVisible(cameraOn && !cameraImage.empty());
-    mCameraBlack->SetVisible(cameraOn && cameraImage.empty());
+    // Black for the audio-only Kitchen camera, and for the pitch-black end of a power-out.
+    mCameraBlack->SetVisible((cameraOn && cameraImage.empty()) || (mState == State::PowerOut && mPowerOutPhase == 2));
     if (cameraOn && !cameraImage.empty())
     {
         if (cameraImage != mCameraShown)
@@ -1246,8 +1466,17 @@ void FnafGame::UpdateView(float deltaTime)
         }
         mCameraFresh = false;
 
-        // The camera slowly pans back and forth.
-        const float pan = (sin(mCameraPanTime * 0.35f) * 0.5f + 0.5f) * glm::max(0.0f, officeWidth - mScreenWidth);
+        // The camera sweeps left to right at a steady speed, holds, sweeps back, and holds.
+        const float kSweep = 4.0f;
+        const float kHold = 1.5f;
+        const float cycle = 2.0f * (kSweep + kHold);
+        const float t = fmod(mCameraPanTime, cycle);
+        float amount = 0.0f;
+        if (t < kHold)                          amount = 0.0f;
+        else if (t < kHold + kSweep)            amount = (t - kHold) / kSweep;
+        else if (t < 2.0f * kHold + kSweep)     amount = 1.0f;
+        else                                    amount = 1.0f - (t - 2.0f * kHold - kSweep) / kSweep;
+        const float pan = amount * glm::max(0.0f, officeWidth - mScreenWidth);
         mCamera->SetRect(-pan, 0.0f, officeWidth, mScreenHeight);
     }
 
@@ -1262,8 +1491,9 @@ void FnafGame::UpdateView(float deltaTime)
         mCameraText->SetText(label);
     }
 
-    // Static bursts when switching cameras or when the view changes.
-    const bool staticOn = cameraOn && mStaticTimer > 0.0f;
+    // Static: a flickering see-through layer over every camera, solid for a moment when the
+    // view switches or changes.
+    const bool staticOn = cameraOn;
     mStatic->SetVisible(staticOn);
     if (staticOn)
     {
@@ -1276,13 +1506,23 @@ void FnafGame::UpdateView(float deltaTime)
             snprintf(name, sizeof(name), "static_%02d", mStaticFrame);
             std::string unused;
             ShowImage(mStaticCanvas, name, unused);
+            mStaticAlpha = 0.25f + (rand() % 26) / 100.0f;
         }
+        mStatic->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, mStaticTimer > 0.0f ? 1.0f : mStaticAlpha));
     }
 
     // Jumpscare: centered on the current view.
     if (mJump->IsVisible())
     {
-        mJump->SetRect(-panX, 0.0f, officeWidth, mScreenHeight);
+        if (mJumpWho == "freddy")
+        {
+            // The power-out jumpscare frames are screen-sized (1280x720), not office-wide.
+            mJump->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
+        }
+        else
+        {
+            mJump->SetRect(-panX, 0.0f, officeWidth, mScreenHeight);
+        }
     }
 }
 
@@ -1312,6 +1552,7 @@ void FnafGame::BuildMenuUi()
     mIntroClock = mRoot->CreateChild<Quad>("IntroClock");
     mIntroFirst = mRoot->CreateChild<Quad>("IntroFirst");
     mIntroNight = mRoot->CreateChild<Quad>("IntroNight");
+    mGameOverText = mRoot->CreateChild<Quad>("GameOverText");
 
     ShowMenuWidgets(false, false, false);
 }
@@ -1335,6 +1576,7 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
     {
         quad->SetVisible(intro);
     }
+    mGameOverText->SetVisible(false);   // shown by UpdateGameOver
 }
 
 void FnafGame::PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y)
@@ -1473,6 +1715,47 @@ void FnafGame::UpdateMenu(float deltaTime)
     }
 }
 
+void FnafGame::UpdateGameOver(float deltaTime)
+{
+    mGameOverTimer += deltaTime;
+
+    // Static animates the whole time.
+    mStaticFrameTimer -= deltaTime;
+    if (mStaticFrameTimer <= 0.0f)
+    {
+        mStaticFrameTimer = 0.05f;
+        mStaticFrame = (mStaticFrame + 1) % glm::max(1, mCounts["static"]);
+        char name[32];
+        snprintf(name, sizeof(name), "static_%02d", mStaticFrame);
+        std::string unused;
+        ShowImage(mStaticCanvas, name, unused);
+    }
+
+    if (mGameOverTimer < kGameOverStaticSeconds)
+    {
+        return;
+    }
+
+    if (!mGameOverText->IsVisible())
+    {
+        // The game over screen: Freddy in the backstage room, "Game Over" in the corner.
+        mJingle.Stop();
+        AudioManager::StopAllSounds();
+        ShowImage(mJumpCanvas, "gameover", mMenuShown);
+        mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        mMenuBack->SetVisible(true);
+        mMenuStaticQuad->SetVisible(false);     // a clean cut: no static, no sound
+        PlaceSprite(mGameOverText, mGameOverSprite, 1280.0f - mGameOverSprite.mWidth * 2.0f - 60.0f, 640.0f);
+        mGameOverText->SetVisible(true);
+    }
+
+    const float shown = mGameOverTimer - kGameOverStaticSeconds;
+    if (shown >= kGameOverSeconds || (shown > 1.0f && (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))))
+    {
+        EnterMenu();
+    }
+}
+
 void FnafGame::UpdateHud()
 {
     const bool playing = (mState == State::Playing || mState == State::PowerOut);
@@ -1519,6 +1802,8 @@ void FnafGame::StopStreams()
     mCheer.Stop();
     mMenuMusic.Stop();
     mMenuHum.Stop();
+    mEerie.Stop();
+    mBreath.Stop();
 }
 
 void FnafGame::PlaySound(const char* name, bool loop, float volume)
