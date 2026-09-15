@@ -113,6 +113,7 @@ private:
     int32_t GetAi(const Animatronic& a) const;
     bool IsAt(const Animatronic& a, Room room) const;
     std::string GetCameraImage(Room camera) const;
+    float GetPirateSongVolume() const;
     std::string GetOfficeImage() const;
     void ShowImage(YuvCanvas& canvas, const std::string& name, std::string& shown);
 
@@ -134,6 +135,8 @@ private:
     PcmPlayer mAmbience;
     PcmPlayer mMusicBox;
     PcmPlayer mRareMusic;       // Foxy's pirate song or the circus tune, one at a time
+    bool mRareMusicIsPirate = false;
+    float mRareMusicVolume = 0.0f;
     PcmPlayer mFanSound;
     PcmPlayer mJingle;          // 6 AM chimes, or Freddy's laugh during the power-out
     PcmPlayer mCheer;
@@ -198,7 +201,8 @@ private:
     float mTabletProgress = 0.0f;
     float mTabletUpTime = 0.0f;
     int32_t mCameraIndex = 0;
-    int32_t mRandomForPic = 0;      // rolled on camera up/switch; 1 = show a rare picture
+    int32_t mRandomForPic = 0;      // rolled on camera up/switch; 1 or 2 = show a rare picture
+    int32_t mRareVariant = 0;       // which rare picture, where a camera has several (0..3)
     bool mCameraFresh = true;       // the view just opened or switched (no garble for that change)
     float mPotsTimer = 0.0f;        // Chica rattling pots in the kitchen
     float mPirateSongTimer = 0.0f;  // rolls for Foxy's pirate song every 4 s

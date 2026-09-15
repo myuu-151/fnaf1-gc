@@ -45,8 +45,10 @@ static constexpr int32_t kBonnieBaseAi = 3;
 static constexpr int32_t kChicaBaseAi = 3;
 static constexpr int32_t kFoxyBaseAi = 2;
 
-// Rare camera pictures (the original rolls a "random for pic" counter). Placeholder odds:
-// the real value is in the game's compiled events, not decoded yet.
+// Rare camera pictures (the original rolls a "random for pic" counter): Freddy staring on
+// the Show Stage, and rare posters on empty cameras. Rolled when the tablet goes up or the
+// camera changes. Placeholder odds: the real value is in the game's compiled events, not
+// decoded yet.
 static constexpr int32_t kRarePicOdds = 20;
 
 // Foxy
@@ -76,7 +78,7 @@ static const CameraInfo kCameras[kNumCameras] = {
 };
 
 static const char* kSoundNames[] = {
-    "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "powerdown", "run", "knock",
+    "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "powerdown", "run", "knock", "honk",
     "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3",
 };
 
@@ -595,7 +597,9 @@ void FnafGame::UpdatePlaying(float deltaTime)
         mPirateSongTimer += 4.0f;
         if (mFoxyStage < 3 && (rand() % 30) == 0 && !mRareMusic.IsPlaying())
         {
-            mRareMusic.Start("snd/piratesong.pcm", (uint32_t)mCounts["size_piratesong"], false, 0.5f);
+            mRareMusicVolume = GetPirateSongVolume();
+            mRareMusic.Start("snd/piratesong.pcm", (uint32_t)mCounts["size_piratesong"], false, mRareMusicVolume);
+            mRareMusicIsPirate = true;
         }
     }
 
@@ -606,6 +610,18 @@ void FnafGame::UpdatePlaying(float deltaTime)
         if ((rand() % 30) == 0 && !mRareMusic.IsPlaying())
         {
             mRareMusic.Start("snd/circus.pcm", (uint32_t)mCounts["size_circus"], false, 0.4f);
+            mRareMusicIsPirate = false;
+        }
+    }
+
+    // The pirate song comes from Pirate Cove: full volume while you watch it, muffled otherwise.
+    if (mRareMusicIsPirate && mRareMusic.IsPlaying())
+    {
+        const float volume = GetPirateSongVolume();
+        if (volume != mRareMusicVolume)
+        {
+            mRareMusicVolume = volume;
+            mRareMusic.SetVolume(volume);
         }
     }
 
@@ -651,10 +667,16 @@ void FnafGame::UpdateInput(float deltaTime)
 
     const bool intruder = IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office);
 
-    // Z mutes the phone call, like the original's "mute call" button.
-    if (Pressed(GAMEPAD_Z) && mCall.IsPlaying())
+    // B mutes the phone call, like the original's "mute call" button.
+    if (Pressed(GAMEPAD_B) && mCall.IsPlaying())
     {
         mCall.Stop();
+    }
+
+    // Z honks the Freddy poster's nose (clicking it in the original), in the office view.
+    if (Pressed(GAMEPAD_Z) && !mTabletUp && mTabletProgress <= 0.0f)
+    {
+        PlaySound("honk");
     }
 
     if (Pressed(GAMEPAD_A))
@@ -669,6 +691,7 @@ void FnafGame::UpdateInput(float deltaTime)
             SetLight(false, false);
             mStaticTimer = kStaticSeconds;
             mRandomForPic = (rand() % kRarePicOdds) + 1;
+            mRareVariant = rand() % 4;
             mCameraFresh = true;
         }
         else
@@ -690,6 +713,7 @@ void FnafGame::UpdateInput(float deltaTime)
                 mCameraIndex = (mCameraIndex + step + kNumCameras) % kNumCameras;
                 mStaticTimer = kStaticSeconds;
                 mRandomForPic = (rand() % kRarePicOdds) + 1;
+                mRareVariant = rand() % 4;
                 mCameraFresh = true;
                 PlaySound("blip");
             }
@@ -970,7 +994,7 @@ void FnafGame::SetLight(bool left, bool on)
     {
         if (!AudioManager::IsSoundPlaying(mSounds["light"].Get<SoundWave>()))
         {
-            PlaySound("light", true, 0.8f);
+            PlaySound("light", true, 1.0f);
         }
     }
     else
@@ -1030,6 +1054,12 @@ std::string FnafGame::GetOfficeImage() const
     return "office";
 }
 
+float FnafGame::GetPirateSongVolume() const
+{
+    const bool watchingCove = mTabletUp && mTabletProgress >= 1.0f && (Room)mCameraIndex == Room::PirateCove;
+    return watchingCove ? 0.6f : 0.12f;
+}
+
 std::string FnafGame::GetCameraImage(Room camera) const
 {
     const bool bonnie = IsAt(mBonnie, camera);
@@ -1045,6 +1075,12 @@ std::string FnafGame::GetCameraImage(Room camera) const
     case Room::DiningArea:   return bonnie ? "cam1b_bonnie" : (chica ? "cam1b_chica" : "cam1b_empty");
     case Room::PirateCove:
     {
+        // Curtains closed: rarely, an "IT'S ME" sign instead of the usual one.
+        if (mFoxyStage <= 0 && mRandomForPic == 1)
+        {
+            return "cam1c_rare_itsme";
+        }
+
         char name[16];
         snprintf(name, sizeof(name), "cam1c_%d", glm::clamp(mFoxyStage, 0, 3));
         return name;
@@ -1061,9 +1097,26 @@ std::string FnafGame::GetCameraImage(Room camera) const
         }
         return bonnie ? "cam2a_bonnie" : "cam2a_empty";
     case Room::SupplyCloset: return bonnie ? "cam3_bonnie" : "cam3_empty";
-    case Room::WestCorner:   return bonnie ? "cam2b_bonnie" : "cam2b_empty";
-    case Room::EastHall:     return chica ? "cam4a_chica" : "cam4a_empty";
-    case Room::EastCorner:   return chica ? "cam4b_chica" : "cam4b_empty";
+    // Rare posters: roll 1 or 2 swaps an empty camera's poster.
+    case Room::WestCorner:
+        if (bonnie) return "cam2b_bonnie";
+        if (mRandomForPic == 1) return "cam2b_rare_freddy";
+        if (mRandomForPic == 2) return "cam2b_rare_golden";
+        return "cam2b_empty";
+    case Room::EastHall:
+        if (chica) return "cam4a_chica";
+        if (mRandomForPic == 1) return "cam4a_rare_faces";
+        if (mRandomForPic == 2) return "cam4a_rare_itsme";
+        return "cam4a_empty";
+    case Room::EastCorner:
+        if (chica) return "cam4b_chica";
+        if (mRandomForPic == 1)
+        {
+            // One of four newspaper clippings.
+            static const char* kNews[] = { "cam4b_rare_news0", "cam4b_rare_news1", "cam4b_rare_news2", "cam4b_rare_news3" };
+            return kNews[glm::clamp(mRareVariant, 0, 3)];
+        }
+        return "cam4b_empty";
     default:                 return "";
     }
 }

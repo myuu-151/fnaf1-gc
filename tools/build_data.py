@@ -51,6 +51,11 @@ BACKGROUNDS = {
     "cam2b_empty": 0, "cam2b_bonnie": 188,
     "cam4a_empty": 67, "cam4a_chica": 221,
     "cam4b_empty": 49, "cam4b_chica": 220,
+    # rare posters on empty cameras ("random for pic" in the original)
+    "cam2b_rare_freddy": 571, "cam2b_rare_golden": 540,
+    "cam4b_rare_news0": 549, "cam4b_rare_news1": 550, "cam4b_rare_news2": 551, "cam4b_rare_news3": 552,
+    "cam4a_rare_faces": 546, "cam4a_rare_itsme": 554,
+    "cam1c_rare_itsme": 553,
 }
 
 JUMPSCARES = {
@@ -78,6 +83,7 @@ SOUNDS = {
     "powerdown": (26, 6.0),
     "run": (55, None),           # running fast3
     "knock": (39, None),         # DOOR_POUNDING_ME: Foxy banging on the left door
+    "honk": (36, None),          # PartyFavorraspyPart_AC01__3: Freddy poster's nose
     "camup": (6, None),          # CAMERA_VIDEO_LOA (raising the tablet)
     "camhum": (8, None),         # COMPUTER_DIGITAL (monitor hum while it's up)
     "garble1": (12, None),       # camera garbles when someone moves on camera

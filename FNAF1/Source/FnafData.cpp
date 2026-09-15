@@ -464,6 +464,14 @@ void PcmPlayer::Stop()
     }
 }
 
+void PcmPlayer::SetVolume(float volume)
+{
+    if (mStream != 0)
+    {
+        AUD_SetStreamVolume(mStream, volume);
+    }
+}
+
 bool PcmPlayer::IsPlaying() const
 {
     return mStream != 0;

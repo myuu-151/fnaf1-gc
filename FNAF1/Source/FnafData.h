@@ -65,6 +65,7 @@ public:
     bool Start(const std::string& relPath, uint32_t sizeBytes, bool loop, float volume);
     void Stop();
     void Update();
+    void SetVolume(float volume);
     bool IsPlaying() const;
 
     // With the stream mutex held: reads the next chunk if one is wanted. The reader thread

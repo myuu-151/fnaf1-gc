@@ -57,7 +57,8 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 | D-pad left / right | Left / right hall light |
 | A | Raise or lower the camera tablet |
 | D-pad left / right (tablet up) | Switch camera |
-| Z | Mute the phone call |
+| B | Mute the phone call |
+| Z (tablet down) | Honk the Freddy poster's nose |
 | Start | Restart after a game over or 6 AM |
 
 ## What the prototype has
@@ -69,14 +70,17 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 - Jumpscares for Bonnie, Chica and Foxy, and Freddy after a power-out
 - Foxy: Pirate Cove stages, the West Hall run on CAM 2A, banging on the closed door (which costs power), and his lunge
 - Game over and 6 AM screens
+- Rare camera pictures: Freddy staring on the Show Stage, and rare posters on empty cameras (Pirate Cove "IT'S ME" sign, West Hall Corner Freddy and Golden Freddy posters, East Hall drawings, East Hall Corner newspapers)
+- The Freddy poster's nose honk
 - Sound:
-  - **Streamed from the disc:** the night 1 phone call, background ambience, the fan, Foxy's pirate song, the power-out music box and Freddy's laugh, and the 6 AM chimes and cheering
+  - **Streamed from the disc:** the night 1 phone call, background ambience, the fan, the rare music (Foxy's pirate song, loud only while watching Pirate Cove, and the faint circus tune), the power-out music box and Freddy's laugh, and the 6 AM chimes and cheering
   - **Short sounds (kept in RAM):** doors, lights, tablet and camera hum, camera garbles when someone moves on camera, footsteps, window scare, Chica's pots in the kitchen, Foxy's running and banging
 
 Not in it yet:
 - Freddy roaming
 - The original AI tables (the prototype uses its own difficulty), and nights 2–5 with their phone calls
-- The exact odds of the rare camera pictures (placeholder: 1 in 20)
+- The exact odds of the rare camera pictures (placeholder: 1 in 20 per picture)
+- Golden Freddy in the office (only his rare poster is in)
 
 ## Data formats (`FNAF1/Scripts/Data`)
 
