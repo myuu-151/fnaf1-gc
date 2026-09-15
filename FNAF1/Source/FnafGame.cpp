@@ -238,6 +238,10 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_first.rgx", &mIntroFirstSprite);
     queueSprite("spr/menu_night.rgx", &mIntroNightSprite);
     queueSprite("spr/menu_gameover.rgx", &mGameOverSprite);
+    // Golden Freddy in the office: loaded up front and stored at 3/4 size. Loading it at full size
+    // in the middle of a night (425 KB file + 425 KB texture) left him invisible, most likely a
+    // failed allocation.
+    queueSprite("spr/golden_office.rgx", &mGoldenSprite);
     queueSprite("spr/menu_six_5.rgx", &mWinFiveSprite);
     queueSprite("spr/menu_six_6.rgx", &mWinSixSprite);
     queueSprite("spr/menu_six_am.rgx", &mWinAmSprite);
@@ -1651,11 +1655,6 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
     {
         mYellowBear = 2;
         PlaySound("giggle", false, 2.0f);
-        // His office picture (425 KB) is only read from the disc once he's needed.
-        if (mGoldenSprite.Get() == nullptr && !LoadSprite("spr/golden_office.rgx", mGoldenSprite))
-        {
-            OctLog("FNAF1: failed to load golden_office");
-        }
         OctLog("FNAF1: golden freddy poster seen");
     }
 

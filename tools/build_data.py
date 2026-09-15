@@ -325,9 +325,10 @@ def build_fan():
 
 def build_golden():
     # Golden Freddy slumped in the office (image 573): 541x521 at (2, 2) in atlas M0003, drawn
-    # with its top-left at (390, 218) in the 1600x720 office.
+    # with its top-left at (390, 218) in the 1600x720 office. Stored at 3/4 of the office scale
+    # (~240 KB instead of 425 KB, stretched when drawn) so it fits in RAM with everything else.
     im = Image.open(os.path.join(SRC, "M0003.png")).convert("RGBA").crop((2, 2, 2 + 541, 2 + 521))
-    size = (round4(541 * BUTTON_SCALE), round4(521 * BUTTON_SCALE))
+    size = (round4(541 * BUTTON_SCALE * 0.75), round4(521 * BUTTON_SCALE * 0.75))
     save_rgx(im.resize(size, Image.LANCZOS), "golden_office")
     print("golden freddy: %dx%d" % size)
 
