@@ -381,6 +381,7 @@ static MutexObject* sAnimMutex = nullptr;
 static std::vector<std::string> sAnimPaths;
 static AnimSlot sAnimSlots[kAnimAhead];
 static size_t sAnimNext = 0;            // next frame for the reader
+static size_t sAnimReading = SIZE_MAX;  // frame the reader is reading right now
 static uint32_t sAnimGeneration = 0;    // bumped by start/stop, so a read in flight is dropped
 
 static bool AnimReaderStep()
@@ -411,11 +412,13 @@ static bool AnimReaderStep()
     const uint32_t generation = sAnimGeneration;
     std::vector<uint8_t> data;
     data.swap(sAnimSlots[freeSlot].mData);  // read into the slot's buffer (not ready, so nobody takes it)
+    sAnimReading = index;
     SYS_UnlockMutex(sAnimMutex);
 
     const bool ok = ReadAnimationFrame(path, data);
 
     SYS_LockMutex(sAnimMutex);
+    sAnimReading = SIZE_MAX;
     AnimSlot& slot = sAnimSlots[freeSlot];
     slot.mData.swap(data);
     if (generation == sAnimGeneration && index == sAnimNext)
@@ -481,6 +484,15 @@ bool AnimPreloadTake(const std::string& relPath, std::vector<uint8_t>& out)
             continue;
         }
 
+        // The reader is reading this very frame: wait for it rather than read it a second time
+        // (on the one CPU core that doubled the cost of the run's later frames).
+        for (int32_t waited = 0; sAnimReading == index && waited < 250; ++waited)
+        {
+            SYS_UnlockMutex(sAnimMutex);
+            SYS_Sleep(1);
+            SYS_LockMutex(sAnimMutex);
+        }
+
         for (AnimSlot& slot : sAnimSlots)
         {
             if (!slot.mReady)
@@ -520,7 +532,9 @@ static ThreadFuncRet StreamReaderMain(void* arg)
 
     for (;;)
     {
-        bool worked = false;
+        // Animation frames first: the streams keep about a second of audio queued, while a frame
+        // is needed within one or two video frames.
+        bool worked = AnimReaderStep();
 
         SYS_LockMutex(sStreamMutex);
         for (size_t i = 0; i < sStreamPlayers.size(); ++i)
@@ -528,8 +542,6 @@ static ThreadFuncRet StreamReaderMain(void* arg)
             worked = sStreamPlayers[i]->ReaderStep() || worked;
         }
         SYS_UnlockMutex(sStreamMutex);
-
-        worked = AnimReaderStep() || worked;
 
         if (!worked)
         {

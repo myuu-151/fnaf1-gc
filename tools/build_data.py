@@ -29,6 +29,9 @@ FFMPEG = os.environ.get("OCTAVE_FFMPEG", r"C:\Users\NoSig\Documents\octave-libog
 BG_SIZE = (992, 448)
 STATIC_SIZE = (320, 176)
 JPEG_QUALITY = 85
+# Foxy's run on CAM 2A: lower quality so each frame is smaller to read over the SD adapter
+# (PIO) while the camera view and the streams keep the CPU busy.
+FOXY_RUN_QUALITY = 60
 
 # Sprites are stored smaller than the 720-line original and stretched when drawn.
 DOOR_HEIGHT = 224
@@ -175,9 +178,9 @@ def src_png(number):
     return os.path.join(SRC, "%04d.png" % number)
 
 
-def save_jpeg(number, name, size):
+def save_jpeg(number, name, size, quality=JPEG_QUALITY):
     im = Image.open(src_png(number)).convert("RGB").resize(size, Image.LANCZOS)
-    im.save(os.path.join(DATA, "img", name + ".jpg"), "JPEG", quality=JPEG_QUALITY,
+    im.save(os.path.join(DATA, "img", name + ".jpg"), "JPEG", quality=quality,
             subsampling="4:2:0", optimize=False, progressive=False)
 
 
@@ -399,7 +402,7 @@ def main():
     counts["static"] = len(STATIC_FRAMES)
     foxy_run = [n for n in FOXY_RUN if os.path.exists(src_png(n))]   # the numbering has gaps (e.g. no 0249)
     for i, n in enumerate(foxy_run):
-        save_jpeg(n, "foxyrun_%02d" % i, BG_SIZE)
+        save_jpeg(n, "foxyrun_%02d" % i, BG_SIZE, FOXY_RUN_QUALITY)
     counts["foxyrun"] = len(foxy_run)
 
     for i, n in enumerate(FLIP_FRAMES):
