@@ -2365,6 +2365,10 @@ static constexpr float kWinSixDy = 110.0f;
 static constexpr float kWinScroll = 112.0f;     // the 5's path: straight up 112 px
 static constexpr float kWinScrollSpeed = 22.5f; // path speed 3: 0.375 px per frame at 60 fps
 static constexpr float kWinCheerSeconds = 201.0f / 60.0f;  // after the 5 stops, "> 200" frames to the next night
+// The frame's transitions: a 1010 ms fade in from black and a 900 ms fade out. Clickteam runs the
+// start-of-frame events (stop sounds, chimes) before the fade in and pauses the rest during both.
+static constexpr float kWinFadeInSeconds = 1.01f;
+static constexpr float kWinFadeOutSeconds = 0.9f;
 
 void FnafGame::StartWin()
 {
@@ -2375,6 +2379,8 @@ void FnafGame::StartWin()
     mState = State::Win;
     mTabletUp = false;
     mTabletProgress = 0.0f;
+    mWinPhase = 0;
+    mWinFadeTime = 0.0f;
     mWinTimer = 0.0f;
     mWinCheered = false;
     mWinCheerTime = 0.0f;
@@ -2397,27 +2403,60 @@ void FnafGame::StartWin()
 
 void FnafGame::UpdateWin(float deltaTime)
 {
-    mWinTimer += deltaTime;
+    float alpha = 1.0f;
+    switch (mWinPhase)
+    {
+    case 0:     // fading in from black
+        mWinFadeTime += deltaTime;
+        alpha = glm::clamp(mWinFadeTime / kWinFadeInSeconds, 0.0f, 1.0f);
+        if (mWinFadeTime >= kWinFadeInSeconds)
+        {
+            mWinPhase = 1;
+        }
+        break;
+
+    case 1:
+    {
+        mWinTimer += deltaTime;
+        const float moved = glm::min(kWinScroll, floor(mWinTimer * kWinScrollSpeed));
+
+        // The 5 stopped: the kids cheer (once), then after the countdown the frame fades out.
+        if (!mWinCheered && moved >= kWinScroll)
+        {
+            mWinCheered = true;
+            mCheer.Start("snd/cheer.pcm", (uint32_t)mCounts["size_cheer"], false, 0.9f);
+        }
+        if (mWinCheered)
+        {
+            mWinCheerTime += deltaTime;
+            if (mWinCheerTime >= kWinCheerSeconds)
+            {
+                mWinPhase = 2;
+                mWinFadeTime = 0.0f;
+            }
+        }
+        break;
+    }
+
+    default:    // fading out to black; the sounds keep playing until the next frame stops them
+        mWinFadeTime += deltaTime;
+        alpha = 1.0f - glm::clamp(mWinFadeTime / kWinFadeOutSeconds, 0.0f, 1.0f);
+        if (mWinFadeTime >= kWinFadeOutSeconds)
+        {
+            // The original goes on to the next night; there's only night 1 so far, so the menu.
+            EnterMenu();
+            return;
+        }
+        break;
+    }
 
     // The path moves in whole pixels.
     const float moved = glm::min(kWinScroll, floor(mWinTimer * kWinScrollSpeed));
     PlaceSprite(mWinFive, mWinFiveSprite, kWinFiveX, kWinFiveY - moved);
     PlaceSprite(mWinSix, mWinSixSprite, kWinFiveX + kWinSixDx, kWinFiveY - moved + kWinSixDy);
-
-    // The 5 stopped: the kids cheer (once), then the next night. There's only night 1 so far, so
-    // it goes back to the menu.
-    if (!mWinCheered && moved >= kWinScroll)
+    for (Quad* quad : { mWinFive, mWinSix, mWinAm })
     {
-        mWinCheered = true;
-        mCheer.Start("snd/cheer.pcm", (uint32_t)mCounts["size_cheer"], false, 0.9f);
-    }
-    if (mWinCheered)
-    {
-        mWinCheerTime += deltaTime;
-        if (mWinCheerTime >= kWinCheerSeconds)
-        {
-            EnterMenu();
-        }
+        quad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, alpha));
     }
 }
 

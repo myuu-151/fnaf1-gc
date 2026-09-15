@@ -154,7 +154,7 @@ STREAMS = {
     "piratesong": (21, None),    # pirate song2: Foxy humming in Pirate Cove
     "circus": (29, None),        # circus: faint carnival tune, rare, any time of the night
     "fan": (2, None),            # Buzz_Fan_Florescent2 (loops all night)
-    "chimes": (32, 8.0),         # chimes 2 (6 AM)
+    "chimes": (32, None),        # chimes 2 (6 AM): its fade-out tail plays until the next frame starts (~10.2 s)
     "cheer": (33, None),         # CROWD_SMALL_CHIL (6 AM)
     "laugh": (56, None),         # Laugh_Giggle_Girl_1d (Freddy, power out)
     "xscream2": (46, None),      # XSCREAM2: Golden Freddy's "creepy end"

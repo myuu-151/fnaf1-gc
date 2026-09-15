@@ -273,7 +273,9 @@ private:
     float mPoundingTimer = 0.0f;    // rolls for door pounding every 10 s
     float mGroanTimer = 0.0f;       // rolls for a groan every 5 s while someone is in the office
     // 6 AM screen (the original's "next day" frame)
-    float mWinTimer = 0.0f;
+    int32_t mWinPhase = 0;          // 0 fading in, 1 running, 2 fading out
+    float mWinFadeTime = 0.0f;
+    float mWinTimer = 0.0f;         // running time (the frame's events are paused during its fades)
     bool mWinCheered = false;       // the 5 has stopped: kids cheering, and the 201-frame countdown runs
     float mWinCheerTime = 0.0f;
     Quad* mWinFive = nullptr;

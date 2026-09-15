@@ -14,7 +14,7 @@ size_breath3 115894
 size_breath4 161316
 size_call 9111552
 size_cheer 149190
-size_chimes 352800
+size_chimes 759062
 size_circus 974674
 size_darkambience 5091328
 size_deadstatic 477736
