@@ -75,20 +75,9 @@ static const CameraInfo kCameras[kNumCameras] = {
     { "4B", "E. Hall Corner" },
 };
 
-static const char* kBackgrounds[] = {
-    "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark",
-    "cam1a_all", "cam1a_no_bonnie", "cam1a_no_chica", "cam1a_freddy", "cam1a_freddy_stare",
-    "cam1b_empty", "cam1b_bonnie", "cam1b_chica", "cam1c_0", "cam1c_1", "cam1c_2", "cam1c_3",
-    "cam5_empty", "cam5_bonnie", "cam7_empty", "cam7_chica",
-    "cam2a_empty", "cam2a_bonnie", "cam3_empty", "cam3_bonnie",
-    "cam2b_empty", "cam2b_bonnie", "cam4a_empty", "cam4a_chica",
-    "cam4b_empty", "cam4b_chica",
-};
-
 static const char* kSoundNames[] = {
-    "fan", "light", "door", "blip", "tablet", "scream", "windowscare", "chimes", "steps", "powerdown", "run", "knock",
-    "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3", "cheer", "laugh",
-    "piratesong",
+    "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "powerdown", "run", "knock",
+    "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3",
 };
 
 // SD diagnostic log (Octave System_Dolphin.cpp; writes /octiso.log when the local logger is enabled).
@@ -159,13 +148,14 @@ void FnafGame::QueueLoadJobs()
 
     char name[64];
 
-    for (const char* bg : kBackgrounds)
+    // Camera backgrounds, jumpscare frames and Foxy's run aren't loaded here: they stay on
+    // the disc and are read when shown (see ShowImage), to keep RAM free for the sounds.
+    // The office pictures (~300 KB, swapped every time the lights flash) and the static
+    // frames, which animate all the time, are kept in RAM.
+    for (const char* office : { "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark" })
     {
-        queueImage(bg);
+        queueImage(office);
     }
-
-    // Jumpscare frames and Foxy's run aren't loaded here: they stay on the disc and are
-    // read one frame at a time while they play (see ShowImage), to keep RAM free.
 
     for (int32_t i = 0; i < mCounts["static"]; ++i)
     {
@@ -251,10 +241,16 @@ void FnafGame::UpdateLoading()
 
     while (mLoadNext < mLoadJobs.size() && SYS_GetTimeMicroseconds() - start < kLoadBudgetUs)
     {
-        if (!RunLoadJob(mLoadJobs[mLoadNext]))
+        const LoadJob& job = mLoadJobs[mLoadNext];
+        if (!RunLoadJob(job))
         {
-            OctLog("FNAF1: failed to load %s", mLoadJobs[mLoadNext].mName.c_str());
-            mLoadFailed = true;
+            OctLog("FNAF1: failed to load %s", job.mName.c_str());
+
+            // A missing sound just stays silent; missing pictures stop the game.
+            if (job.mType != LoadType::Sound)
+            {
+                mLoadFailed = true;
+            }
         }
         ++mLoadNext;
     }
@@ -271,12 +267,16 @@ void FnafGame::UpdateLoading()
 
     if (mLoadFailed || mDoors[0].mFrames.empty() || mDoors[1].mFrames.empty() || mFlipFrames.empty())
     {
-        OctLog("FNAF1: data loading FAILED");
-        mLoadText->SetText("Loading failed");
+        if (!mLoadFailedLogged)
+        {
+            OctLog("FNAF1: data loading FAILED");
+            mLoadText->SetText("Loading failed");
+            mLoadFailedLogged = true;
+        }
         return;
     }
 
-    OctLog("FNAF1: data loaded: %u images, %u sounds", (unsigned)mImages.size(), (unsigned)mSounds.size());
+    OctLog("FNAF1: data loaded: %u images, %u sounds, free %u KB", (unsigned)mImages.size(), (unsigned)mSounds.size(), GetFreeMemoryKb());
 
     for (Widget* widget : { (Widget*)mLoadBack, (Widget*)mLoadBarBack, (Widget*)mLoadBar, (Widget*)mLoadText })
     {
@@ -420,7 +420,7 @@ void FnafGame::StartNight()
     mJump->SetVisible(false);
     ShowMessage("");
 
-    PlaySound("fan", true, 0.6f);
+    mFanSound.Start("snd/fan.pcm", (uint32_t)mCounts["size_fan"], true, 0.6f);
 
     mAmbience.Start("snd/ambience.pcm", (uint32_t)mCounts["size_ambience"], true, 0.35f);
     mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 1.0f);
@@ -450,9 +450,39 @@ void FnafGame::Update(float deltaTime)
         return;
     }
 
+    const uint64_t streamStart = SYS_GetTimeMicroseconds();
     mCall.Update();
     mAmbience.Update();
     mMusicBox.Update();
+    mPirateSong.Update();
+    mFanSound.Update();
+    mJingle.Update();
+    mCheer.Update();
+    const uint64_t streamUs = SYS_GetTimeMicroseconds() - streamStart;
+
+    // Timing summary every 5 s: average and worst frame, and time spent reading streams.
+    static uint32_t sPerfFrames = 0;
+    static float sPerfTime = 0.0f;
+    static float sPerfWorst = 0.0f;
+    static uint64_t sStreamUs = 0;
+    static uint64_t sStreamWorstUs = 0;
+    ++sPerfFrames;
+    sPerfTime += deltaTime;
+    sPerfWorst = glm::max(sPerfWorst, deltaTime);
+    sStreamUs += streamUs;
+    sStreamWorstUs = glm::max(sStreamWorstUs, streamUs);
+    if (sPerfTime >= 5.0f)
+    {
+        OctLog("FNAF1: perf avg %.1f ms, worst %.1f ms, streams %.1f ms/frame (worst %.1f ms), call %s, free %u KB",
+            sPerfTime * 1000.0f / sPerfFrames, sPerfWorst * 1000.0f,
+            sStreamUs / 1000.0f / sPerfFrames, sStreamWorstUs / 1000.0f,
+            mCall.IsPlaying() ? "on" : "off", GetFreeMemoryKb());
+        sPerfFrames = 0;
+        sPerfTime = 0.0f;
+        sPerfWorst = 0.0f;
+        sStreamUs = 0;
+        sStreamWorstUs = 0;
+    }
 
     deltaTime = glm::min(deltaTime, 0.1f);
 
@@ -474,7 +504,7 @@ void FnafGame::Update(float deltaTime)
             mCheerTimer -= deltaTime;
             if (mCheerTimer <= 0.0f)
             {
-                PlaySound("cheer", false, 0.9f);
+                mCheer.Start("snd/cheer.pcm", (uint32_t)mCounts["size_cheer"], false, 0.9f);
             }
         }
         if (Pressed(GAMEPAD_START) || Pressed(GAMEPAD_A))
@@ -502,7 +532,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
         {
             AudioManager::StopAllSounds();
             StopStreams();
-            PlaySound("chimes");
+            mJingle.Start("snd/chimes.pcm", (uint32_t)mCounts["size_chimes"], false, 1.0f);
             mCheerTimer = 6.0f;
             mState = State::Win;
             mTabletUp = false;
@@ -518,7 +548,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
         {
             mLaughed = true;
             mMusicBox.Stop();
-            PlaySound("laugh");
+            mJingle.Start("snd/laugh.pcm", (uint32_t)mCounts["size_laugh"], false, 1.0f);
         }
         if (mPowerOutTimer > 10.0f)
         {
@@ -640,9 +670,9 @@ void FnafGame::UpdateInput(float deltaTime)
 
                 // Now and then Foxy hums while you look into Pirate Cove.
                 if ((Room)mCameraIndex == Room::PirateCove && mFoxyStage < 3 && (rand() % 4) == 0 &&
-                    !AudioManager::IsSoundPlaying(mSounds["piratesong"].Get<SoundWave>()))
+                    !mPirateSong.IsPlaying())
                 {
-                    PlaySound("piratesong", false, 0.5f);
+                    mPirateSong.Start("snd/piratesong.pcm", (uint32_t)mCounts["size_piratesong"], false, 0.5f);
                 }
             }
         }
@@ -1037,7 +1067,7 @@ void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string
         return;
     }
 
-    // Animation frames (jumpscares, Foxy's run) are read from the disc as they play.
+    // Backgrounds and animation frames (jumpscares, Foxy's run) are read from the disc when shown.
     if (ReadDataFile("img/" + name + ".jpg", mFrameBuffer) && canvas.Show(mFrameBuffer))
     {
         shown = name;
@@ -1195,6 +1225,10 @@ void FnafGame::StopStreams()
     mCall.Stop();
     mAmbience.Stop();
     mMusicBox.Stop();
+    mPirateSong.Stop();
+    mFanSound.Stop();
+    mJingle.Stop();
+    mCheer.Stop();
 }
 
 void FnafGame::PlaySound(const char* name, bool loop, float volume)

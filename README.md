@@ -70,8 +70,8 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 - Foxy: Pirate Cove stages, the West Hall run on CAM 2A, banging on the closed door (which costs power), and his lunge
 - Game over and 6 AM screens
 - Sound:
-  - **Streamed from the disc:** the night 1 phone call, background ambience, and the power-out music box
-  - **Short sounds:** doors, lights, fan, tablet and camera hum, camera garbles when someone moves on camera, footsteps, window scare, Chica's pots in the kitchen, Foxy's humming, running and banging, Freddy's laugh, the 6 AM chimes and cheering
+  - **Streamed from the disc:** the night 1 phone call, background ambience, the fan, Foxy's pirate song, the power-out music box and Freddy's laugh, and the 6 AM chimes and cheering
+  - **Short sounds (kept in RAM):** doors, lights, tablet and camera hum, camera garbles when someone moves on camera, footsteps, window scare, Chica's pots in the kitchen, Foxy's running and banging
 
 Not in it yet:
 - Freddy roaming
@@ -89,6 +89,11 @@ Not in it yet:
 
 ## Notes
 
-- **Logging:** with Octave's local SD logger enabled, the game writes its startup steps (`FNAF1: ...`) to `/octiso.log` alongside the engine's file loads.
+- **Logging:** with Octave's local SD logger enabled, the game writes its startup steps (`FNAF1: ...`) to `/octiso.log` alongside the engine's file loads. Every 5 s it also writes a `perf` line with frame times, time spent on streams, and free memory.
+- **Memory:** the GameCube's 24 MB fills up quickly. Only the office pictures, static frames, sprites and short sounds are loaded up front. Camera pictures, jumpscares and Foxy's run are read from the disc when shown, and long sounds are streamed.
+- **Streaming from the SD:**
+  - Each streamed sound opens its own handle on `FNAF1.iso` at the sound's offset (found from the ISO's file table). On FAT, a backwards seek walks the file's cluster chain from the start, so sounds sharing the engine's one handle took up to 180 ms per read.
+  - The reads run on a low-priority background thread, because even straight-through reads take 50–100 ms per chunk.
+  - Disc boots (Dolphin, or a real disc) read on the main thread instead: the engine's whole-file DVD reads aren't locked against other threads.
 - **Sound names:** these come from the game's play-sound actions in `Application.ccj` (bytes `88 00 06 00`, then a u16 sound number, then the UTF-16 name). For example, sound 15 is `XSCREAM` and sound 41 is `voiceover1c`.
 - **Door animations:** the frames come from the texture atlases. The left door's frames are 223 px wide and the right door's are 229 px, ordered by how much of the doorway they cover. The door and button positions in the office are estimates.

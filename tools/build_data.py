@@ -68,19 +68,16 @@ FLIP_FRAMES = [142, 46, 144, 132, 133, 136, 137, 138, 139, 140]
 
 SOUNDS = {
     # name: (sound number, max seconds or None)
-    "fan": (2, None),            # Buzz_Fan_Florescent2
     "light": (1, None),          # BallastHumMedium2
     "door": (3, None),           # SFXBible_12478
     "blip": (11, None),          # blip3
     "tablet": (7, None),         # put down
     "scream": (15, None),        # XSCREAM
     "windowscare": (31, None),
-    "chimes": (32, 8.0),         # chimes 2
     "steps": (9, None),          # deep steps
     "powerdown": (26, 6.0),
     "run": (55, None),           # running fast3
     "knock": (39, None),         # DOOR_POUNDING_ME: Foxy banging on the left door
-    "piratesong": (21, None),    # pirate song2: Foxy humming in Pirate Cove
     "camup": (6, None),          # CAMERA_VIDEO_LOA (raising the tablet)
     "camhum": (8, None),         # COMPUTER_DIGITAL (monitor hum while it's up)
     "garble1": (12, None),       # camera garbles when someone moves on camera
@@ -89,8 +86,6 @@ SOUNDS = {
     "pots1": (16, None),         # OVEN-DRA: Chica in the kitchen
     "pots2": (17, None),
     "pots3": (19, None),
-    "cheer": (33, None),         # CROWD_SMALL_CHIL (6 AM)
-    "laugh": (56, None),         # Laugh_Giggle_Girl_1d (Freddy)
 }
 
 # Long sounds, streamed from the disc at runtime instead of loaded into RAM.
@@ -98,6 +93,11 @@ STREAMS = {
     "call": (41, None),          # voiceover1c: the night 1 phone call
     "ambience": (28, None),      # ambience2
     "musicbox": (30, None),      # music box (power out)
+    "piratesong": (21, None),    # pirate song2: Foxy humming in Pirate Cove
+    "fan": (2, None),            # Buzz_Fan_Florescent2 (loops all night)
+    "chimes": (32, 8.0),         # chimes 2 (6 AM)
+    "cheer": (33, None),         # CROWD_SMALL_CHIL (6 AM)
+    "laugh": (56, None),         # Laugh_Giggle_Girl_1d (Freddy, power out)
 }
 
 

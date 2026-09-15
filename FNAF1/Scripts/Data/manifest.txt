@@ -9,5 +9,10 @@ jump_foxy 20
 jump_freddy 17
 size_ambience 2646000
 size_call 9111552
+size_cheer 149190
+size_chimes 352800
+size_fan 423154
+size_laugh 243750
 size_musicbox 2718310
+size_piratesong 425984
 static 8

@@ -133,10 +133,17 @@ private:
     PcmPlayer mCall;
     PcmPlayer mAmbience;
     PcmPlayer mMusicBox;
+    PcmPlayer mPirateSong;
+    PcmPlayer mFanSound;
+    PcmPlayer mJingle;          // 6 AM chimes, or Freddy's laugh during the power-out
+    PcmPlayer mCheer;
+    // The engine runs at most 4 streams: the night has call, ambience, fan and pirate song;
+    // StopStreams() clears them before the power-out (music box, laugh) and 6 AM (chimes, cheer).
 
     std::vector<LoadJob> mLoadJobs;
     size_t mLoadNext = 0;
     bool mLoadFailed = false;
+    bool mLoadFailedLogged = false;
 
     YuvCanvas mOfficeCanvas;
     YuvCanvas mCameraCanvas;
