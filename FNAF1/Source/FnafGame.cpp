@@ -426,6 +426,8 @@ void FnafGame::StartNight()
     mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 1.0f);
     mCameraFresh = true;
     mPotsTimer = 3.0f;
+    mPirateSongTimer = 4.0f;
+    mCircusTimer = 5.0f;
     mCheerTimer = 0.0f;
     mLaughed = false;
 }
@@ -454,7 +456,7 @@ void FnafGame::Update(float deltaTime)
     mCall.Update();
     mAmbience.Update();
     mMusicBox.Update();
-    mPirateSong.Update();
+    mRareMusic.Update();
     mFanSound.Update();
     mJingle.Update();
     mCheer.Update();
@@ -584,6 +586,29 @@ void FnafGame::UpdatePlaying(float deltaTime)
         mPotsTimer = 1.0f;
     }
 
+    // Rare music, as in the original's events: "every 4 s, Random(30) = 1" plays Foxy's
+    // pirate song, and "every 5 s, Random(30) = 1" plays the faint circus tune. The pirate
+    // song event also checks a counter we haven't mapped; here it needs Foxy in the cove.
+    mPirateSongTimer -= deltaTime;
+    if (mPirateSongTimer <= 0.0f)
+    {
+        mPirateSongTimer += 4.0f;
+        if (mFoxyStage < 3 && (rand() % 30) == 0 && !mRareMusic.IsPlaying())
+        {
+            mRareMusic.Start("snd/piratesong.pcm", (uint32_t)mCounts["size_piratesong"], false, 0.5f);
+        }
+    }
+
+    mCircusTimer -= deltaTime;
+    if (mCircusTimer <= 0.0f)
+    {
+        mCircusTimer += 5.0f;
+        if ((rand() % 30) == 0 && !mRareMusic.IsPlaying())
+        {
+            mRareMusic.Start("snd/circus.pcm", (uint32_t)mCounts["size_circus"], false, 0.4f);
+        }
+    }
+
     // Power: each thing in use adds a bar.
     mUsage = 1;
     for (const Door& door : mDoors)
@@ -667,13 +692,6 @@ void FnafGame::UpdateInput(float deltaTime)
                 mRandomForPic = (rand() % kRarePicOdds) + 1;
                 mCameraFresh = true;
                 PlaySound("blip");
-
-                // Now and then Foxy hums while you look into Pirate Cove.
-                if ((Room)mCameraIndex == Room::PirateCove && mFoxyStage < 3 && (rand() % 4) == 0 &&
-                    !mPirateSong.IsPlaying())
-                {
-                    mPirateSong.Start("snd/piratesong.pcm", (uint32_t)mCounts["size_piratesong"], false, 0.5f);
-                }
             }
         }
         return;
@@ -1225,7 +1243,7 @@ void FnafGame::StopStreams()
     mCall.Stop();
     mAmbience.Stop();
     mMusicBox.Stop();
-    mPirateSong.Stop();
+    mRareMusic.Stop();
     mFanSound.Stop();
     mJingle.Stop();
     mCheer.Stop();

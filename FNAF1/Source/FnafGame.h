@@ -133,11 +133,11 @@ private:
     PcmPlayer mCall;
     PcmPlayer mAmbience;
     PcmPlayer mMusicBox;
-    PcmPlayer mPirateSong;
+    PcmPlayer mRareMusic;       // Foxy's pirate song or the circus tune, one at a time
     PcmPlayer mFanSound;
     PcmPlayer mJingle;          // 6 AM chimes, or Freddy's laugh during the power-out
     PcmPlayer mCheer;
-    // The engine runs at most 4 streams: the night has call, ambience, fan and pirate song;
+    // The engine runs at most 4 streams: the night has call, ambience, fan and rare music;
     // StopStreams() clears them before the power-out (music box, laugh) and 6 AM (chimes, cheer).
 
     std::vector<LoadJob> mLoadJobs;
@@ -201,6 +201,8 @@ private:
     int32_t mRandomForPic = 0;      // rolled on camera up/switch; 1 = show a rare picture
     bool mCameraFresh = true;       // the view just opened or switched (no garble for that change)
     float mPotsTimer = 0.0f;        // Chica rattling pots in the kitchen
+    float mPirateSongTimer = 0.0f;  // rolls for Foxy's pirate song every 4 s
+    float mCircusTimer = 0.0f;      // rolls for the circus tune every 5 s
     float mCheerTimer = 0.0f;       // kids cheering after the 6 AM chimes
     bool mLaughed = false;          // Freddy's laugh during the power-out
     float mCameraPanTime = 0.0f;

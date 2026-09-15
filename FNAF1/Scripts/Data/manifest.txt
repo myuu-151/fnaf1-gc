@@ -11,6 +11,7 @@ size_ambience 2646000
 size_call 9111552
 size_cheer 149190
 size_chimes 352800
+size_circus 974674
 size_fan 423154
 size_laugh 243750
 size_musicbox 2718310

@@ -94,6 +94,7 @@ STREAMS = {
     "ambience": (28, None),      # ambience2
     "musicbox": (30, None),      # music box (power out)
     "piratesong": (21, None),    # pirate song2: Foxy humming in Pirate Cove
+    "circus": (29, None),        # circus: faint carnival tune, rare, any time of the night
     "fan": (2, None),            # Buzz_Fan_Florescent2 (loops all night)
     "chimes": (32, 8.0),         # chimes 2 (6 AM)
     "cheer": (33, None),         # CROWD_SMALL_CHIL (6 AM)
