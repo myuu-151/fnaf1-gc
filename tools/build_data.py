@@ -31,7 +31,7 @@ STATIC_SIZE = (320, 176)
 JPEG_QUALITY = 85
 # Foxy's run on CAM 2A: lower quality so each frame is smaller to read over the SD adapter
 # (PIO) while the camera view and the streams keep the CPU busy.
-FOXY_RUN_QUALITY = 60
+FOXY_RUN_QUALITY = 50
 
 # Sprites are stored smaller than the 720-line original and stretched when drawn.
 DOOR_HEIGHT = 224
