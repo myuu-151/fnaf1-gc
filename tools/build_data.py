@@ -117,7 +117,7 @@ SOUNDS = {
     "pots1": (16, None),         # OVEN-DRA: Chica in the kitchen
     "pots2": (17, None),
     "pots3": (19, None),
-    "pots4": (18, None),         # OVEN-DRA_7 (the original's 5 kitchen actions use it twice)
+    "pots4": (18, 3.0),          # OVEN-DRA_7 (the original's 5 kitchen actions use it twice); trimmed, it's long
     "error": (4, None),          # error: door/light buttons while someone is in the office
 }
 
@@ -146,9 +146,9 @@ STREAMS = {
 }
 
 # Streamed sounds kept in stereo (the original files are stereo; everything else is made mono).
-STEREO_SOUNDS = {
-    "minidv",
-}
+# Streamed sounds kept in stereo. Empty for now: a stereo stream froze Dolphin (the tape sound)
+# and crashed hardware right away (the phone call), while mono streams are stable.
+STEREO_SOUNDS = set()
 
 
 def src_png(number):

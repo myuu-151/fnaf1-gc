@@ -533,6 +533,15 @@ void FnafGame::Update(float deltaTime)
 
     deltaTime = glm::min(deltaTime, 0.1f);
 
+    // Crash breadcrumb: every state change goes to the log.
+    static const char* kStateNames[] = { "Loading", "Menu", "Newspaper", "NightIntro", "Playing", "PowerOut", "Jumpscare", "GameOver", "Win" };
+    static int32_t sLoggedState = -1;
+    if ((int32_t)mState != sLoggedState)
+    {
+        sLoggedState = (int32_t)mState;
+        OctLog("FNAF1: state -> %s (hour %d, power %.0f, free %u KB)", kStateNames[sLoggedState], mHour, mPower, GetFreeMemoryKb());
+    }
+
     switch (mState)
     {
     case State::Playing:
@@ -926,7 +935,7 @@ void FnafGame::UpdateInput(float deltaTime)
             PlaySound("camup");
             // Cameras open: the original plays the MiniDV tape sound (stereo, full volume) on
             // its own channel and turns the fan's channel down (to 10, from 25).
-            mTapeSound.Start("snd/minidv.pcm", (uint32_t)mCounts["size_minidv"], false, 1.0f, 2);
+            mTapeSound.Start("snd/minidv.pcm", (uint32_t)mCounts["size_minidv"], false, 1.0f);
             mFanSound.SetVolume(0.24f);
             SetLight(true, false);
             SetLight(false, false);
@@ -958,6 +967,7 @@ void FnafGame::UpdateInput(float deltaTime)
                 mRareVariant = rand() % 4;
                 mCameraFresh = true;
                 PlaySound("blip");
+                OctLog("FNAF1: camera %s", kCameras[mCameraIndex].mId);
             }
         }
         return;
@@ -1291,6 +1301,7 @@ void FnafGame::StartJumpscare(const std::string& who)
     mTabletProgress = 0.0f;
     mOfficePan = 0.5f;      // face the middle of the office, where the lunge happens
     mJumpWho = who;
+    OctLog("FNAF1: jumpscare %s", who.c_str());
     mJumpFrame = 0;
     mJumpTimer = 0.0f;
 

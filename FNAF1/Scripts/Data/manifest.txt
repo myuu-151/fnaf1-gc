@@ -23,7 +23,7 @@ size_fan 390080
 size_laugh 243750
 size_menumusic 2749666
 size_menustatic 1450496
-size_minidv 1466708
+size_minidv 733354
 size_musicbox 2718310
 size_piratesong 425984
 size_powerdown 825812

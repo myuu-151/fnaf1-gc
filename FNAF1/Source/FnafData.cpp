@@ -21,6 +21,11 @@
 // SD diagnostic log (Octave System_Dolphin.cpp).
 void OctLog(const char* format, ...);
 
+// Octave System_Dolphin.cpp: take/release the engine's file I/O lock. All SD access must go
+// through it; the SD driver hangs when two threads use the card at once.
+void OctLockFileIo();
+void OctUnlockFileIo();
+
 static const char* kDataRoot = "FNAF1/Scripts/Data/";
 
 bool ReadDataFile(const std::string& relPath, std::vector<uint8_t>& out)
@@ -164,7 +169,7 @@ static constexpr uint32_t kStreamRate = 22050;
 // Each stream reads through its own file handle, so its reads run straight through the
 // file. A small queue keeps the engine's stream buffers (heap memory) small.
 static constexpr uint32_t kStreamChunkBytes = kStreamRate;             // 0.5 s per read
-static constexpr uint64_t kStreamAheadFrames = kStreamRate * 3 / 2;    // keep ~1.5 s queued
+static constexpr uint64_t kStreamAheadFrames = kStreamRate;            // keep ~1 s queued (the engine buffers it in RAM)
 
 static uint32_t sStreamUnderruns = 0;
 
@@ -195,7 +200,7 @@ static uint32_t ReadBe32(const uint8_t* p)
     return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
 }
 
-static void ScanIso()
+static void ScanIsoLocked()
 {
     sIsoScanned = true;
 
@@ -265,6 +270,13 @@ static void ScanIso()
     }
 }
 
+static void ScanIso()
+{
+    OctLockFileIo();
+    ScanIsoLocked();
+    OctUnlockFileIo();
+}
+
 static bool FindIsoFile(const std::string& relPath, uint32_t& offset)
 {
     if (!sIsoScanned)
@@ -291,7 +303,6 @@ static bool FindIsoFile(const std::string& relPath, uint32_t& offset)
 // One reader thread serves every PcmPlayer. The main thread only moves finished chunks
 // into the engine's audio streams, so a slow SD read never lands on a frame.
 static MutexObject* sStreamMutex = nullptr;
-static ThreadObject* sStreamThread = nullptr;
 static std::vector<PcmPlayer*> sStreamPlayers;
 
 static ThreadFuncRet StreamReaderMain(void* arg)
@@ -351,9 +362,12 @@ bool PcmPlayer::ReaderStep()
     bool ok = false;
     if (mFile != nullptr)
     {
-        // Only seeks when looping back to the start.
+        // Only seeks when looping back to the start. Holds the engine's file I/O lock so it never
+        // overlaps the main thread's SD use (log writes, picture loads).
+        OctLockFileIo();
         ok = (mFilePos == offset || fseek(mFile, long(mFileBase + offset), SEEK_SET) == 0) &&
              fread(mReady.data(), 1, bytes, mFile) == bytes;
+        OctUnlockFileIo();
         mFilePos = ok ? (offset + bytes) : UINT32_MAX;
     }
     else
@@ -405,7 +419,9 @@ bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop,
     uint32_t base = 0;
     if (FindIsoFile(relPath, base))
     {
+        OctLockFileIo();
         mFile = fopen(sIsoPath.c_str(), "rb");
+        OctUnlockFileIo();
         mFileBase = base;
         mFilePos = UINT32_MAX;
     }
@@ -424,7 +440,11 @@ bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop,
     if (sStreamMutex == nullptr)
     {
         sStreamMutex = SYS_CreateMutex();
-        sStreamThread = SYS_CreateThread(StreamReaderMain, nullptr);
+        // Created directly for a bigger stack: SYS_CreateThread gives 16 KB, and on hardware the
+        // reader hung at the same read every time (fread -> libfat -> SD driver, plus logging),
+        // which looks like a stack overflow corrupting memory.
+        static lwp_t sReaderThread = LWP_THREAD_NULL;
+        LWP_CreateThread(&sReaderThread, StreamReaderMain, nullptr, nullptr, 64 * 1024, 40);
     }
 
     SYS_LockMutex(sStreamMutex);
@@ -432,6 +452,8 @@ bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop,
     mWantRead = true;
     SYS_UnlockMutex(sStreamMutex);
 
+    OctLog("FNAF1: stream start %s (stream %u, %s, free %u KB)", relPath.c_str(), mStream,
+           mFile != nullptr ? "own SD file" : "engine read", GetFreeMemoryKb());
     AUD_SetStreamVolume(mStream, volume);
     AUD_SetStreamPaused(mStream, false);
     return true;
@@ -459,13 +481,16 @@ void PcmPlayer::Stop()
 
     if (mStream != 0)
     {
+        OctLog("FNAF1: stream stop %s", mPath.c_str());
         AUD_CloseStream(mStream);
         mStream = 0;
     }
 
     if (mFile != nullptr)
     {
+        OctLockFileIo();
         fclose(mFile);
+        OctUnlockFileIo();
         mFile = nullptr;
     }
 }
