@@ -133,6 +133,7 @@ STREAMS = {
     "breath3": (24, None),
     "breath4": (25, None),
     "deadstatic": (20, None),    # static: the game over screen
+    "minidv": (5, None),         # MiniDV_Tape_Eject: plays when the cameras open (stereo)
     "musicbox": (30, None),      # music box (power out)
     "menumusic": (35, None),     # darkness music (main menu)
     "menustatic": (34, None),    # static2 (main menu)
@@ -142,6 +143,11 @@ STREAMS = {
     "chimes": (32, 8.0),         # chimes 2 (6 AM)
     "cheer": (33, None),         # CROWD_SMALL_CHIL (6 AM)
     "laugh": (56, None),         # Laugh_Giggle_Girl_1d (Freddy, power out)
+}
+
+# Streamed sounds kept in stereo (the original files are stereo; everything else is made mono).
+STEREO_SOUNDS = {
+    "minidv",
 }
 
 
@@ -330,7 +336,8 @@ def build_sounds(table):
     for name, (number, max_seconds) in table.items():
         src = os.path.join(SRC, "%04d.ogg" % number)
         dst = os.path.join(DATA, "snd", name + ".pcm")
-        cmd = [FFMPEG, "-v", "error", "-y", "-i", src, "-ac", "1", "-ar", "22050"]
+        channels = "2" if name in STEREO_SOUNDS else "1"
+        cmd = [FFMPEG, "-v", "error", "-y", "-i", src, "-ac", channels, "-ar", "22050"]
         if max_seconds:
             cmd += ["-t", str(max_seconds)]
         cmd += ["-f", "s16le", dst]

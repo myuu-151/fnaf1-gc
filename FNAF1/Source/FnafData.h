@@ -53,6 +53,9 @@ bool ReadDataRange(const std::string& relPath, uint32_t offset, uint32_t size, c
 // Free heap memory in KB (for the SD log).
 uint32_t GetFreeMemoryKb();
 
+// How many times a streamed sound ran out of queued audio (a skip), for the debug line.
+uint32_t GetStreamUnderruns();
+
 // A long sound (phone call, ambience, music box) played from the disc through an
 // Octave PCM stream a little at a time, so it never sits in RAM. Call Update() every
 // frame. 16-bit little-endian mono PCM at 22050 Hz.
@@ -62,7 +65,8 @@ public:
 
     ~PcmPlayer();
 
-    bool Start(const std::string& relPath, uint32_t sizeBytes, bool loop, float volume);
+    // channels: 1 = mono, 2 = stereo (interleaved) 16-bit PCM.
+    bool Start(const std::string& relPath, uint32_t sizeBytes, bool loop, float volume, uint32_t channels = 1);
     void Stop();
     void Update();
     void SetVolume(float volume);
@@ -79,6 +83,7 @@ private:
     std::string mPath;
     uint32_t mSize = 0;
     uint64_t mQueuedFrames = 0;
+    uint32_t mChannels = 1;
     bool mLoop = false;
     bool mUnderrun = false;         // logged once per gap
 

@@ -504,6 +504,7 @@ void FnafGame::Update(float deltaTime)
     mMenuHum.Update();
     mEerie.Update();
     mBreath.Update();
+    mTapeSound.Update();
     const uint64_t streamUs = SYS_GetTimeMicroseconds() - streamStart;
 
     // Timing summary every 5 s: average and worst frame, and time spent reading streams.
@@ -923,7 +924,10 @@ void FnafGame::UpdateInput(float deltaTime)
         if (mTabletUp)
         {
             PlaySound("camup");
-            PlaySound("camhum", true, 0.5f);
+            // Cameras open: the original plays the MiniDV tape sound (stereo, full volume) on
+            // its own channel and turns the fan's channel down (to 10, from 25).
+            mTapeSound.Start("snd/minidv.pcm", (uint32_t)mCounts["size_minidv"], false, 1.0f, 2);
+            mFanSound.SetVolume(0.24f);
             SetLight(true, false);
             SetLight(false, false);
             mStaticTimer = kStaticSeconds;
@@ -934,7 +938,8 @@ void FnafGame::UpdateInput(float deltaTime)
         else
         {
             PlaySound("tablet");
-            StopSound("camhum");
+            mTapeSound.Stop();              // the original mutes its channel when the cameras close
+            mFanSound.SetVolume(0.6f);
         }
     }
 
@@ -1043,7 +1048,8 @@ void FnafGame::UpdateAnimatronics(float deltaTime)
             {
                 mTabletUp = false;
                 PlaySound("tablet");
-                StopSound("camhum");
+                mTapeSound.Stop();
+                mFanSound.SetVolume(0.6f);
             }
             if (!mTabletUp && mTabletProgress <= 0.0f && a->mOfficeTimer > 0.8f)
             {
@@ -1127,12 +1133,10 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         if (cameraOn && (before == watched || a.mRoom == watched))
         {
             mCameraCutTimer = 5.0f;
+            // Random(4) + 1: 1 plays COMPUTER_DIGITAL, 2-4 play garble1-3.
             const int32_t roll = (rand() % 4) + 1;
-            if (roll >= 2)
-            {
-                static const char* kGarbles[] = { "garble1", "garble2", "garble3" };
-                PlaySound(kGarbles[roll - 2], false, 0.7f);
-            }
+            static const char* kMoveSounds[] = { "camhum", "garble1", "garble2", "garble3" };
+            PlaySound(kMoveSounds[roll - 1], false, 0.7f);
         }
         // Footsteps as they close in, louder the nearer they get (the original plays its
         // "deep steps" at 10-40% depending on where they are).
@@ -1824,9 +1828,10 @@ void FnafGame::UpdateHud()
                                         "W.Hall", "Closet", "W.Corner", "E.Hall", "E.Corner", "L.Door", "R.Door", "Office" };
         static const char* kLayers[] = { "dark + eerie 0", "dark + eerie 30", "dark + eerie 50", "dark + eerie 75" };
         char debug[128];
-        snprintf(debug, sizeof(debug), "Ambience %s | Bonnie %s | Chica %s | Foxy %d",
+        snprintf(debug, sizeof(debug), "Ambience %s | Bonnie %s | Chica %s | Foxy %d | skips %u",
                  mAmbienceLayer >= 0 ? kLayers[mAmbienceLayer] : "-",
-                 kRooms[(int)mBonnie.mRoom], kRooms[(int)mChica.mRoom], mFoxyStage);
+                 kRooms[(int)mBonnie.mRoom], kRooms[(int)mChica.mRoom], mFoxyStage,
+                 (unsigned)GetStreamUnderruns());
         mDebugText->SetText(debug);
     }
 
@@ -1865,6 +1870,7 @@ void FnafGame::StopStreams()
     mMenuHum.Stop();
     mEerie.Stop();
     mBreath.Stop();
+    mTapeSound.Stop();
 }
 
 void FnafGame::PlaySound(const char* name, bool loop, float volume)

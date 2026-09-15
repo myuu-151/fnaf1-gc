@@ -157,6 +157,7 @@ private:
     PcmPlayer mMenuHum;
     PcmPlayer mEerie;           // eerie ambience, louder as the animatronics get close
     PcmPlayer mBreath;          // breathing when someone gets into the office
+    PcmPlayer mTapeSound;       // MiniDV tape (stereo) while the cameras are open
     float mEerieVolume = 0.0f;
     int32_t mAmbienceLayer = -1;    // how many of Bonnie and Chica are off the stage (eerie ambience level)
     Text* mDebugText = nullptr;     // debug line: ambience level and rooms

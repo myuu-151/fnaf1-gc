@@ -164,7 +164,14 @@ static constexpr uint32_t kStreamRate = 22050;
 // Each stream reads through its own file handle, so its reads run straight through the
 // file. A small queue keeps the engine's stream buffers (heap memory) small.
 static constexpr uint32_t kStreamChunkBytes = kStreamRate;             // 0.5 s per read
-static constexpr uint64_t kStreamAheadFrames = kStreamRate;            // keep ~1 s queued
+static constexpr uint64_t kStreamAheadFrames = kStreamRate * 3 / 2;    // keep ~1.5 s queued
+
+static uint32_t sStreamUnderruns = 0;
+
+uint32_t GetStreamUnderruns()
+{
+    return sStreamUnderruns;
+}
 
 uint32_t GetFreeMemoryKb()
 {
@@ -290,6 +297,8 @@ static std::vector<PcmPlayer*> sStreamPlayers;
 static ThreadFuncRet StreamReaderMain(void* arg)
 {
     // Below the main thread (priority 64), like VideoStream: reads run while it waits for vsync.
+    // Both SD reads and the engine's DVD reads busy-wait (IsoDvd_Dolphin polls DI_CR), so a
+    // higher priority would hold up frames.
     LWP_SetThreadPriority(LWP_GetSelf(), 40);
 
     for (;;)
@@ -333,7 +342,7 @@ bool PcmPlayer::ReaderStep()
     }
 
     const uint32_t offset = mOffset;
-    const uint32_t bytes = glm::min(kStreamChunkBytes, mSize - offset);
+    const uint32_t bytes = glm::min(kStreamChunkBytes * mChannels, mSize - offset);
     mReading = true;
 
     // Read without the lock; Stop() waits for mReading to clear before closing mFile.
@@ -373,7 +382,7 @@ PcmPlayer::~PcmPlayer()
     Stop();
 }
 
-bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop, float volume)
+bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop, float volume, uint32_t channels)
 {
     Stop();
 
@@ -383,7 +392,8 @@ bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop,
         return false;
     }
 
-    mStream = AUD_OpenStream(kStreamRate, 1);
+    mChannels = (channels == 2) ? 2 : 1;
+    mStream = AUD_OpenStream(kStreamRate, mChannels);
     if (mStream == 0)
     {
         OctLog("FNAF1: no free audio stream for %s", relPath.c_str());
@@ -401,14 +411,14 @@ bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop,
     }
 
     mPath = relPath;
-    mSize = sizeBytes & ~1u;
+    mSize = sizeBytes & ~(2u * mChannels - 1u);     // whole frames only
     mQueuedFrames = 0;
     mLoop = loop;
     mUnderrun = false;
     mOffset = 0;
     mReading = false;
     mReadFailed = false;
-    mReady.resize(kStreamChunkBytes);
+    mReady.resize(kStreamChunkBytes * mChannels);
     mReadyBytes = 0;
 
     if (sStreamMutex == nullptr)
@@ -489,7 +499,7 @@ void PcmPlayer::Update()
     if (mReadyBytes > 0)
     {
         AUD_QueueStreamData(mStream, (const uint8_t*)mReady.data(), mReadyBytes);
-        mQueuedFrames += mReadyBytes / 2;
+        mQueuedFrames += mReadyBytes / (2 * mChannels);
         mReadyBytes = 0;
     }
 
@@ -500,6 +510,7 @@ void PcmPlayer::Update()
     const bool underrun = moreData && mQueuedFrames > 0 && played >= mQueuedFrames;
     if (underrun && !mUnderrun)
     {
+        sStreamUnderruns++;
         OctLog("FNAF1: stream underrun in %s at %.1f s", mPath.c_str(), played / 22050.0f);
     }
     mUnderrun = underrun;

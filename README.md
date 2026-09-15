@@ -23,7 +23,7 @@ Requirements:
 - [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built and `Octave.exe` rebuilt. Use commit `99db4e5` or later:
   - `73155d6` makes the SD Gecko driver write at 13.5 MHz; before it, writes at 27 MHz corrupted files on passive SD adapters.
   - `99db4e5` makes the packager build a project's own `Source/` + `Makefile_GCN` (without it, it compiles Octave's Standalone game), and locks the engine's whole-file disc reads (without it, disc boots such as Dolphin can crash, see `issues/04`).
-  - **Not in the Octave repo yet:** `AUD_MAX_PCM_STREAMS` in `Engine/Source/Audio/Dolphin/Audio_Dolphin.cpp` raised from 4 to 6. A night streams up to 6 sounds at once (call, fan, ambience, eerie ambience, rare music, breathing); with 4, some won't start.
+  - **Not in the Octave repo yet:** `AUD_MAX_PCM_STREAMS` in `Engine/Source/Audio/Dolphin/Audio_Dolphin.cpp` raised from 4 to 8. A night streams up to 7 sounds at once (call, fan, dark ambience, eerie ambience, rare music, groans, the camera tape sound); with 4, some won't start. 8 is the most libasnd allows next to the engine's 8 normal voices.
 - Python 3 with Pillow
 - ffmpeg (the script uses Octave's `External/ffmpeg/bin/ffmpeg.exe`, or `OCTAVE_FFMPEG`)
 
