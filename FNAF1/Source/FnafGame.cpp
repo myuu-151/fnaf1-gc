@@ -699,6 +699,26 @@ void FnafGame::UpdatePlaying(float deltaTime)
 
     if (mState == State::PowerOut)
     {
+        // The original's move rolls (#187, #188) don't check the power, so Bonnie and Chica keep
+        // wandering in the dark, and every move plays their footsteps.
+        for (Animatronic* a : { &mBonnie, &mChica })
+        {
+            if (a->mRoom == Room::Office)
+            {
+                continue;
+            }
+            a->mMoveTimer += deltaTime;
+            if (a->mMoveTimer >= a->mMoveInterval)
+            {
+                a->mMoveTimer -= a->mMoveInterval;
+                if ((rand() % 20) + 1 <= GetAi(*a))
+                {
+                    MoveAnimatronic(*a);
+                }
+            }
+        }
+
+        UpdateRandomSounds(deltaTime);
         UpdatePowerOut(deltaTime);
         return;
     }
@@ -784,6 +804,39 @@ void FnafGame::UpdatePlaying(float deltaTime)
         return;
     }
 
+    UpdateRandomSounds(deltaTime);
+
+    // Every 5 s while Bonnie or Chica is in the office ("got you") and the cameras are up, a 1/3
+    // chance of one of the 4 groaning sounds.
+    if (mTabletUp && (IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office)))
+    {
+        mGroanTimer -= deltaTime;
+        if (mGroanTimer <= 0.0f)
+        {
+            mGroanTimer += 5.0f;
+            if ((rand() % 3) == 0 && !mBreath.IsPlaying())
+            {
+                const int32_t groan = (rand() % 4) + 1;
+                char path[32];
+                char key[32];
+                snprintf(path, sizeof(path), "snd/breath%d.pcm", groan);
+                snprintf(key, sizeof(key), "size_breath%d", groan);
+                mBreath.Start(path, (uint32_t)mCounts[key], false, 0.8f);
+            }
+        }
+    }
+    else
+    {
+        mGroanTimer = 5.0f;
+    }
+
+    UpdateEerieAndPower(deltaTime);
+}
+
+void FnafGame::UpdateRandomSounds(float deltaTime)
+{
+    // These events don't check the power, so they keep playing during a power-out too.
+
     // Chica in the kitchen: every 4 s, a 50% chance of one of the original's 5 kitchen sounds
     // (4 files, one used twice); loud when you're on CAM 6.
     if (mChica.mRoom == Room::Kitchen)
@@ -818,30 +871,6 @@ void FnafGame::UpdatePlaying(float deltaTime)
         {
             PlaySound("knock", false, (10 + rand() % 40) * 0.024f);
         }
-    }
-
-    // Every 5 s while Bonnie or Chica is in the office ("got you") and the cameras are up, a 1/3
-    // chance of one of the 4 groaning sounds.
-    if (mTabletUp && (IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office)))
-    {
-        mGroanTimer -= deltaTime;
-        if (mGroanTimer <= 0.0f)
-        {
-            mGroanTimer += 5.0f;
-            if ((rand() % 3) == 0 && !mBreath.IsPlaying())
-            {
-                const int32_t groan = (rand() % 4) + 1;
-                char path[32];
-                char key[32];
-                snprintf(path, sizeof(path), "snd/breath%d.pcm", groan);
-                snprintf(key, sizeof(key), "size_breath%d", groan);
-                mBreath.Start(path, (uint32_t)mCounts[key], false, 0.8f);
-            }
-        }
-    }
-    else
-    {
-        mGroanTimer = 5.0f;
     }
 
     // Rare music, as in the original's events: "every 4 s, Random(30) = 1" plays Foxy's
@@ -880,6 +909,10 @@ void FnafGame::UpdatePlaying(float deltaTime)
             mRareMusic.SetVolume(volume);
         }
     }
+}
+
+void FnafGame::UpdateEerieAndPower(float deltaTime)
+{
 
     // Eerie ambience: its volume follows how much danger you're in. Each of these adds a step:
     // Bonnie on CAM 3, 2A or 2B, at the door or inside; Chica on CAM 4A or 4B, at the door or
@@ -1006,7 +1039,7 @@ void FnafGame::UpdatePowerOut(float deltaTime)
             mPowerOutPhaseTimer = 0.0f;
             mPowerOutRollTimer = 0.0f;
             mFreddyFlickerTimer = 0.0f;
-            mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], true, 0.8f);
+            mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], true, 1.0f);
         }
         break;
 
@@ -1028,6 +1061,8 @@ void FnafGame::UpdatePowerOut(float deltaTime)
             mMusicBox.Stop();
             mAmbience.Stop();
             mJingle.Stop();
+            mRareMusic.Stop();      // the original's "stop all sounds" (#293)
+            AudioManager::StopAllSounds();
             mFanSound.Start("snd/fan.pcm", (uint32_t)mCounts["size_fan"], true, 1.2f);
         }
         break;
@@ -1043,6 +1078,8 @@ void FnafGame::UpdatePowerOut(float deltaTime)
             mPowerOutRollTimer = 0.0f;
             mPowerOutFlickerDark = true;
             mFanSound.Stop();
+            mRareMusic.Stop();      // the original's "stop all sounds" (#297)
+            AudioManager::StopAllSounds();
         }
         break;
 

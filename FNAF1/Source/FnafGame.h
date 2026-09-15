@@ -126,6 +126,8 @@ private:
     void StartPowerOut();
     void UpdatePowerOut(float deltaTime);
     void StartJumpscare(const std::string& who);
+    void UpdateRandomSounds(float deltaTime);
+    void UpdateEerieAndPower(float deltaTime);
     void UpdateGoldenFreddy(float deltaTime);
     void StartCreepyEnd();
     void UpdateCreepyEnd(float deltaTime);
