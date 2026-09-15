@@ -238,6 +238,9 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_first.rgx", &mIntroFirstSprite);
     queueSprite("spr/menu_night.rgx", &mIntroNightSprite);
     queueSprite("spr/menu_gameover.rgx", &mGameOverSprite);
+    queueSprite("spr/menu_six_5.rgx", &mWinFiveSprite);
+    queueSprite("spr/menu_six_6.rgx", &mWinSixSprite);
+    queueSprite("spr/menu_six_am.rgx", &mWinAmSprite);
 
     for (int32_t i = 0; i < mCounts["static"]; ++i)
     {
@@ -532,7 +535,6 @@ void FnafGame::StartNight()
     mPoundingTimer = 10.0f;
     mGroanTimer = 5.0f;
     mCameraCutTimer = 0.0f;
-    mCheerTimer = 0.0f;
     mLaughed = false;
 
     mYellowBear = 0;
@@ -642,18 +644,7 @@ void FnafGame::Update(float deltaTime)
         break;
 
     case State::Win:
-        if (mCheerTimer > 0.0f)
-        {
-            mCheerTimer -= deltaTime;
-            if (mCheerTimer <= 0.0f)
-            {
-                mCheer.Start("snd/cheer.pcm", (uint32_t)mCounts["size_cheer"], false, 0.9f);
-            }
-        }
-        if (Pressed(GAMEPAD_START) || Pressed(GAMEPAD_A))
-        {
-            EnterMenu();
-        }
+        UpdateWin(deltaTime);
         break;
 
     case State::Menu:
@@ -680,13 +671,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
 
         if (mHour >= 6)
         {
-            AudioManager::StopAllSounds();
-            StopStreams();
-            mJingle.Start("snd/chimes.pcm", (uint32_t)mCounts["size_chimes"], false, 1.0f);
-            mCheerTimer = 6.0f;
-            mState = State::Win;
-            mTabletUp = false;
-            ShowMessage("6 AM");
+            StartWin();
             return;
         }
     }
@@ -2154,6 +2139,17 @@ void FnafGame::BuildMenuUi()
     mIntroNight = mRoot->CreateChild<Quad>("IntroNight");
     mGameOverText = mRoot->CreateChild<Quad>("GameOverText");
 
+    // 6 AM screen, in the original's object order: the digits, then the black masks over them.
+    mWinFive = mRoot->CreateChild<Quad>("WinFive");
+    mWinAm = mRoot->CreateChild<Quad>("WinAm");
+    mWinSix = mRoot->CreateChild<Quad>("WinSix");
+    mWinMaskBottom = mRoot->CreateChild<Quad>("WinMaskBottom");
+    mWinMaskTop = mRoot->CreateChild<Quad>("WinMaskTop");
+    for (Quad* mask : { mWinMaskBottom, mWinMaskTop })
+    {
+        mask->SetColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    }
+
     ShowMenuWidgets(false, false, false);
 }
 
@@ -2177,6 +2173,10 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
         quad->SetVisible(intro);
     }
     mGameOverText->SetVisible(false);   // shown by UpdateGameOver
+    for (Quad* quad : { mWinFive, mWinSix, mWinAm, mWinMaskTop, mWinMaskBottom })
+    {
+        quad->SetVisible(false);        // shown by StartWin
+    }
 }
 
 void FnafGame::PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y)
@@ -2353,6 +2353,71 @@ void FnafGame::UpdateGameOver(float deltaTime)
     if (shown >= kGameOverSeconds || (shown > 1.0f && (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))))
     {
         EnterMenu();
+    }
+}
+
+// The original's "next day" frame (1280x720, black). Positions are its object positions minus
+// their hotspots: the digits' hotspot is (-5, 0), the masks' (74, 55).
+static constexpr float kWinFiveX = 549.0f;
+static constexpr float kWinFiveY = 298.0f;
+static constexpr float kWinSixDx = 4.0f;        // the 6 is placed at the 5 + (4, 110) every frame
+static constexpr float kWinSixDy = 110.0f;
+static constexpr float kWinScroll = 112.0f;     // the 5's path: straight up 112 px
+static constexpr float kWinScrollSpeed = 22.5f; // path speed 3: 0.375 px per frame at 60 fps
+static constexpr float kWinCheerSeconds = 201.0f / 60.0f;  // after the 5 stops, "> 200" frames to the next night
+
+void FnafGame::StartWin()
+{
+    // Frame start: all sounds stop and the chimes play.
+    AudioManager::StopAllSounds();
+    StopStreams();
+    mJingle.Start("snd/chimes.pcm", (uint32_t)mCounts["size_chimes"], false, 1.0f);
+    mState = State::Win;
+    mTabletUp = false;
+    mTabletProgress = 0.0f;
+    mWinTimer = 0.0f;
+    mWinCheered = false;
+    mWinCheerTime = 0.0f;
+    OctLog("FNAF1: 6 AM");
+
+    ShowMessage("");
+    ShowMenuWidgets(false, false, false);
+    mMenuBlack->SetVisible(true);
+    PlaceSprite(mWinAm, mWinAmSprite, 645.0f, 296.0f);
+    const float scaleX = mScreenWidth / 1280.0f;
+    const float scaleY = mScreenHeight / 720.0f;
+    mWinMaskTop->SetRect(498.0f * scaleX, 169.0f * scaleY, 158.0f * scaleX, 118.0f * scaleY);
+    mWinMaskBottom->SetRect(499.0f * scaleX, 385.0f * scaleY, 158.0f * scaleX, 118.0f * scaleY);
+    for (Quad* quad : { mWinFive, mWinSix, mWinAm, mWinMaskTop, mWinMaskBottom })
+    {
+        quad->SetVisible(true);
+    }
+    UpdateWin(0.0f);
+}
+
+void FnafGame::UpdateWin(float deltaTime)
+{
+    mWinTimer += deltaTime;
+
+    // The path moves in whole pixels.
+    const float moved = glm::min(kWinScroll, floor(mWinTimer * kWinScrollSpeed));
+    PlaceSprite(mWinFive, mWinFiveSprite, kWinFiveX, kWinFiveY - moved);
+    PlaceSprite(mWinSix, mWinSixSprite, kWinFiveX + kWinSixDx, kWinFiveY - moved + kWinSixDy);
+
+    // The 5 stopped: the kids cheer (once), then the next night. There's only night 1 so far, so
+    // it goes back to the menu.
+    if (!mWinCheered && moved >= kWinScroll)
+    {
+        mWinCheered = true;
+        mCheer.Start("snd/cheer.pcm", (uint32_t)mCounts["size_cheer"], false, 0.9f);
+    }
+    if (mWinCheered)
+    {
+        mWinCheerTime += deltaTime;
+        if (mWinCheerTime >= kWinCheerSeconds)
+        {
+            EnterMenu();
+        }
     }
 }
 

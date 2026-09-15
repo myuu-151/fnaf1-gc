@@ -109,6 +109,8 @@ private:
     void ShowMenuWidgets(bool menu, bool newspaper, bool intro);
     void PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y);
     void UpdateGameOver(float deltaTime);
+    void StartWin();
+    void UpdateWin(float deltaTime);
 
     void UpdatePlaying(float deltaTime);
     void UpdateInput(float deltaTime);
@@ -270,7 +272,18 @@ private:
     float mCircusTimer = 0.0f;      // rolls for the circus tune every 5 s
     float mPoundingTimer = 0.0f;    // rolls for door pounding every 10 s
     float mGroanTimer = 0.0f;       // rolls for a groan every 5 s while someone is in the office
-    float mCheerTimer = 0.0f;       // kids cheering after the 6 AM chimes
+    // 6 AM screen (the original's "next day" frame)
+    float mWinTimer = 0.0f;
+    bool mWinCheered = false;       // the 5 has stopped: kids cheering, and the 201-frame countdown runs
+    float mWinCheerTime = 0.0f;
+    Quad* mWinFive = nullptr;
+    Quad* mWinSix = nullptr;
+    Quad* mWinAm = nullptr;
+    Quad* mWinMaskTop = nullptr;
+    Quad* mWinMaskBottom = nullptr;
+    Sprite mWinFiveSprite;
+    Sprite mWinSixSprite;
+    Sprite mWinAmSprite;
     bool mLaughed = false;          // Freddy's laugh during the power-out
     float mCameraPanTime = 0.0f;
     float mFlickerTimer = 0.0f;

@@ -87,6 +87,10 @@ MENU_TEXT = {
     "night": ("M0005", 572, 792, 125, 31),      # Night
     "copyright": ("M0002", 794, 1000, 224, 14), # (c)2014 Scott Cawthon
     "gameover": ("M0004", 224, 972, 206, 34),   # Game Over
+    # 6 AM screen ("next day" frame): the 5 scrolls up out of view and the 6 in, next to "AM"
+    "six_5": ("M0003", 406, 608, 53, 72),
+    "six_6": ("M0003", 463, 608, 53, 72),
+    "six_am": ("M0001", 884, 602, 113, 72),
 }
 MENU_SCALE = (640 / 1280.0, 480 / 720.0)
 

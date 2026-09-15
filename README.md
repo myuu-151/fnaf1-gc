@@ -66,7 +66,7 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 | D-pad left / right (tablet up) | Switch camera |
 | B | Mute the phone call |
 | Z (tablet down) | Honk the Freddy poster's nose |
-| A or START (game over / 6 AM) | Back to the main menu |
+| A or START (game over) | Back to the main menu (the 6 AM screen goes back on its own, as the original moves on to the next night) |
 | X | Debug: power out now |
 | Y | Debug: Bonnie's jumpscare |
 | D-pad down | Debug: Chica's jumpscare |
