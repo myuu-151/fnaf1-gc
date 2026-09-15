@@ -74,12 +74,23 @@ static constexpr float kFoxyRunFrameSeconds = 1.0f / 39.0f;  // animation speed 
 static constexpr float kFoxyRunSeconds = 100.0f / 60.0f;  // the original's run: 100 frames at 60 fps
 
 // Load cost of animation frames (jumpscares, Foxy's run): summed while one plays, logged when it ends.
+static constexpr uint32_t kAnimStatsMaxFrames = 40;
+struct AnimFrameStat
+{
+    int32_t index = -1;             // frame number
+    bool preloaded = false;         // read ahead by the reader thread
+    uint32_t readUs = 0;
+    uint32_t decodeUs = 0;
+    uint32_t sincePreviousUs = 0;   // from the previous frame's load to this one's
+};
 struct AnimLoadStats
 {
     uint32_t frames = 0;
     uint64_t readUs = 0;
     uint64_t decodeUs = 0;
     uint64_t worstUs = 0;
+    uint64_t lastShowUs = 0;
+    AnimFrameStat perFrame[kAnimStatsMaxFrames];
 };
 static AnimLoadStats sAnimStats;
 
@@ -92,6 +103,17 @@ static void LogAnimStats(const char* label)
         OctLog("FNAF1: %s: %u frames loaded, read avg %.1f ms, decode avg %.1f ms, worst frame %.1f ms", label,
                sAnimStats.frames, sAnimStats.readUs / 1000.0f / sAnimStats.frames,
                sAnimStats.decodeUs / 1000.0f / sAnimStats.frames, sAnimStats.worstUs / 1000.0f);
+
+        // One line per frame: which frame, pre-read or read now, read and decode time, and the time
+        // since the previous frame was loaded (the gap the player sees).
+        const uint32_t logged = glm::min(sAnimStats.frames, kAnimStatsMaxFrames);
+        for (uint32_t i = 0; i < logged; ++i)
+        {
+            const AnimFrameStat& stat = sAnimStats.perFrame[i];
+            OctLog("FNAF1:   frame %2d %s read %5.1f ms decode %5.1f ms gap %5.1f ms", stat.index,
+                   stat.preloaded ? "pre-read" : "read now", stat.readUs / 1000.0f, stat.decodeUs / 1000.0f,
+                   stat.sincePreviousUs / 1000.0f);
+        }
     }
     sAnimStats = AnimLoadStats();
 }
@@ -238,6 +260,14 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_first.rgx", &mIntroFirstSprite);
     queueSprite("spr/menu_night.rgx", &mIntroNightSprite);
     queueSprite("spr/menu_gameover.rgx", &mGameOverSprite);
+    // Foxy's run (33 frames, ~880 KB at quality 50) stays in RAM: read from the SD while the
+    // cameras are up, a frame took 50-117 ms and the run lagged. From RAM every frame is only the
+    // ~22 ms decode. Room comes from the engine freeing its boot splash texture (~1.3 MB).
+    for (int32_t i = 0; i < mCounts["foxyrun"]; ++i)
+    {
+        snprintf(name, sizeof(name), "foxyrun_%02d", i);
+        queueImage(name);
+    }
     queueSprite("spr/menu_six_5.rgx", &mWinFiveSprite);
     queueSprite("spr/menu_six_6.rgx", &mWinSixSprite);
     queueSprite("spr/menu_six_am.rgx", &mWinAmSprite);
@@ -734,7 +764,6 @@ void FnafGame::UpdatePlaying(float deltaTime)
         mFoxyRunTimer = 0.0f;
         mFoxyRunFrame = 0;
         mFoxyRunFrameTimer = 0.0f;
-        StartAnimPreload("foxyrun", mCounts["foxyrun"], 0);
         PlaySound("run", false, 2.0f);
         OctLog("FNAF1: debug: foxy runs");
     }
@@ -1520,7 +1549,6 @@ void FnafGame::UpdateFoxy(float deltaTime)
         mFoxyRunTimer = 0.0f;
         mFoxyRunFrame = 0;
         mFoxyRunFrameTimer = 0.0f;
-        StartAnimPreload("foxyrun", mCounts["foxyrun"], 0);
         PlaySound("run", false, 2.0f);
         return;
     }
@@ -1950,8 +1978,9 @@ void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string
     const bool animation = name.compare(0, 5, "jump_") == 0 || name.compare(0, 8, "foxyrun_") == 0;
     const uint64_t startUs = SYS_GetTimeMicroseconds();
     const std::string path = "img/" + name + ".jpg";
-    const bool read = animation ? (AnimPreloadTake(path, mFrameBuffer) || ReadAnimationFrame(path, mFrameBuffer))
-                                : ReadDataFile(path, mFrameBuffer);
+    const bool preloaded = animation && AnimPreloadTake(path, mFrameBuffer);
+    const bool read = preloaded || (animation ? ReadAnimationFrame(path, mFrameBuffer)
+                                              : ReadDataFile(path, mFrameBuffer));
     const uint64_t readUs = SYS_GetTimeMicroseconds();
     if (read && canvas.Show(mFrameBuffer))
     {
@@ -1961,6 +1990,19 @@ void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string
 
     if (animation)
     {
+        if (sAnimStats.frames < kAnimStatsMaxFrames)
+        {
+            // Per frame, kept in memory and logged when the animation ends (logging to the SD here
+            // would slow the animation down).
+            AnimFrameStat& stat = sAnimStats.perFrame[sAnimStats.frames];
+            const size_t underscore = name.rfind('_');
+            stat.index = (underscore != std::string::npos) ? atoi(name.c_str() + underscore + 1) : -1;
+            stat.preloaded = preloaded;
+            stat.readUs = uint32_t(readUs - startUs);
+            stat.decodeUs = uint32_t(endUs - readUs);
+            stat.sincePreviousUs = sAnimStats.lastShowUs != 0 ? uint32_t(startUs - sAnimStats.lastShowUs) : 0;
+        }
+        sAnimStats.lastShowUs = startUs;
         sAnimStats.frames++;
         sAnimStats.readUs += readUs - startUs;
         sAnimStats.decodeUs += endUs - readUs;
