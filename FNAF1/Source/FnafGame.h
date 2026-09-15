@@ -62,6 +62,9 @@ private:
         float mMoveInterval = 5.0f;
         float mOfficeTimer = 0.0f;
         bool mSeenAtDoor = false;
+        int32_t mPose = 1;              // 1 or 2: which picture of her some cameras show (re-rolled on every move roll)
+        bool mAttackArmed = false;      // inside, and the cameras have been up since: lowering them starts the jumpscare
+        float mTabletUpInside = 0.0f;   // time the cameras have been up while she's inside (30 s pulls them down)
     };
 
     struct Door
@@ -117,6 +120,7 @@ private:
     void MoveAnimatronic(Animatronic& a);
     void UpdateFoxy(float deltaTime);
     void FoxyArrive();
+    void LowerTablet();
     void StartPowerOut();
     void UpdatePowerOut(float deltaTime);
     void StartJumpscare(const std::string& who);
@@ -236,8 +240,9 @@ private:
     int32_t mFoxyStage = 0;
     float mFoxyMoveTimer = 0.0f;
     float mFoxyLockTimer = 0.0f;    // can't move for a while after the cameras were up
-    float mFoxyRunTimer = 0.0f;     // time left before he arrives once out of the cove
-    bool mFoxyRunning = false;      // the West Hall run is playing
+    float mFoxyRunTimer = 0.0f;     // time since he left the cove (25 s to the door) or started running (1.67 s)
+    bool mFoxyRunning = false;      // the West Hall run is playing (the original's progress 4)
+    bool mFoxyAtDoor = false;       // at the left door, waiting for the tablet to go down (progress 5)
     int32_t mFoxyRunFrame = 0;
     float mFoxyRunFrameTimer = 0.0f;
     int32_t mFoxyKnocks = 0;
@@ -250,8 +255,7 @@ private:
     float mTabletProgress = 0.0f;
     float mTabletUpTime = 0.0f;
     int32_t mCameraIndex = 0;
-    int32_t mRandomForPic = 0;      // rolled on camera up/switch; 1 or 2 = show a rare picture
-    int32_t mRareVariant = 0;       // which rare picture, where a camera has several (0..3)
+    int32_t mRandomForPic = 0;      // the original's "random for pic": Random(100) + 1, rolled when the tablet goes down
     bool mCameraFresh = true;       // the view just opened or switched (no garble for that change)
     float mPotsTimer = 0.0f;        // Chica rattling pots in the kitchen
     float mPirateSongTimer = 0.0f;  // rolls for Foxy's pirate song every 4 s
@@ -261,12 +265,16 @@ private:
     float mCheerTimer = 0.0f;       // kids cheering after the 6 AM chimes
     bool mLaughed = false;          // Freddy's laugh during the power-out
     float mCameraPanTime = 0.0f;
+    float mFlickerTimer = 0.0f;
+    bool mHallLit = false;          // CAM 2A caught by the light this flicker step (3 in 10)
+    bool mLightDropout = false;     // a hall light drops out this flicker step (1 in 10)
     float mStaticTimer = 0.0f;
     float mStaticFrameTimer = 0.0f;
     int32_t mStaticFrame = 0;
     float mFanTime = 0.0f;
     float mPowerOutTimer = 0.0f;
-    int32_t mPowerOutPhase = 0;     // 0 dark, 1 music box + Freddy's face, 2 pitch black
+    int32_t mPowerOutPhase = 0;     // 0 dark, 1 music box + Freddy's face, 2 lights flicker out, 3 pitch black
+    bool mPowerOutFlickerDark = false;  // phase 2: this frame is black
     float mPowerOutPhaseTimer = 0.0f;
     float mPowerOutRollTimer = 0.0f;
     float mFreddyFlickerTimer = 0.0f;

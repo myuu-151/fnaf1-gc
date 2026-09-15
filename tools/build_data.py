@@ -45,17 +45,21 @@ BACKGROUNDS = {
     # Show Stage: 19 = normal pose (2 is the rare everyone-stares frame); alone, Freddy faces forward (224; 355 is him staring).
     "cam1a_all": 19, "cam1a_no_bonnie": 68, "cam1a_no_chica": 223, "cam1a_freddy": 224,
     "cam1a_freddy_stare": 355,      # rare variant ("random for pic" in the original)
-    "cam1b_empty": 48, "cam1b_bonnie": 90, "cam1b_chica": 215,
+    # Bonnie and Chica have two poses on some cameras (the original re-rolls it on every move):
+    # 1B Bonnie 90 / 120, 1B Chica 222 / 215, 4A Chica 221 / 226, 7 Chica 217 / 219.
+    "cam1b_empty": 48, "cam1b_bonnie": 90, "cam1b_bonnie2": 120, "cam1b_chica": 215, "cam1b_chica2": 222,
     "cam1c_0": 66, "cam1c_1": 211, "cam1c_2": 338, "cam1c_3": 240,   # Pirate Cove: closed, peeking, stepping out, gone
     "cam5_empty": 83, "cam5_bonnie": 205,
-    "cam7_empty": 41, "cam7_chica": 217,
-    "cam2a_empty": 44, "cam2a_bonnie": 206,     # (241/244/340 are Foxy running)
+    "cam5_rare": 354, "cam5_bonnie_stare": 555,     # "random for pic" <= 5 empty, <= 10 with Bonnie
+    "cam7_empty": 41, "cam7_chica": 217, "cam7_chica2": 219,
+    # West Hall: dark (43), and lit on the light's flicker frames, empty (44) or with Bonnie (206)
+    "cam2a_dark": 43, "cam2a_empty": 44, "cam2a_bonnie": 206,     # (241/244/340 are Foxy running)
     "cam3_empty": 62, "cam3_bonnie": 190,
     "cam2b_empty": 0, "cam2b_bonnie": 188,
-    "cam4a_empty": 67, "cam4a_chica": 221,
+    "cam4a_empty": 67, "cam4a_chica": 221, "cam4a_chica2": 226,
     "cam4b_empty": 49, "cam4b_chica": 220,
     # rare posters on empty cameras ("random for pic" in the original)
-    "cam2b_rare_freddy": 571, "cam2b_rare_golden": 540,
+    "cam2b_rare_freddy": 571,       # (540, the golden Freddy poster, is only for his rare event)
     "cam4b_rare_news0": 549, "cam4b_rare_news1": 550, "cam4b_rare_news2": 551, "cam4b_rare_news3": 552,
     "cam4a_rare_faces": 546, "cam4a_rare_itsme": 554,
     "cam1c_rare_itsme": 553,
@@ -86,13 +90,13 @@ MENU_SCALE = (640 / 1280.0, 480 / 720.0)
 JUMPSCARES = {
     "bonnie": [301, 291, 303] + list(range(293, 301)),
     "chica": [279, 65, 281, 69, 216] + list(range(228, 238)) + [239],
-    "freddy": list(range(308, 326)),    # power-out: lunging out of the dark (1280x720, drawn full screen)
+    "freddy": [326, 307, 348] + list(range(308, 326)),    # power-out: lunging out of the dark (1280x720, drawn full screen)
     "foxy": [413, 242, 415, 243] + list(range(396, 413)) + [412] * 4,     # lunging in from the left doorway, then holds
 }
 # Foxy running down the West Hall (CAM 2A), far to past the camera.
 # Every West Hall frame with Foxy (found by matching the hall's poster wall); the
 # numbers interleave with other animations (e.g. 292 and 302 sit inside Bonnie's).
-FOXY_RUN = [241, 340] + list(range(244, 251)) + [280] + list(range(282, 291)) + [292, 302, 306, 327] + list(range(329, 338))   # 337 = last frame (empty hall)
+FOXY_RUN = [241, 241, 241, 340] + list(range(244, 251)) + [280] + list(range(282, 291)) + [292, 302, 306, 327] + list(range(329, 338))   # 337 = last frame (empty hall)
 STATIC_FRAMES = [12, 13, 14, 15, 16, 17, 18, 20]
 FLIP_FRAMES = [142, 46, 144, 132, 133, 136, 137, 138, 139, 140]
 

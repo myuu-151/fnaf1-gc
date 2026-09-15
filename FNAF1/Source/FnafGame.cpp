@@ -31,6 +31,9 @@ static constexpr float kFanWidth = 138.0f;
 static constexpr float kFanHeight = 196.0f;
 
 // Timing
+// The original's clock: a minute counter that starts at 0, ticks every second and starts the next
+// hour at 90, resetting to 1. So the first hour is 90 s and the rest 89 s (6 AM at 535 s).
+static constexpr float kFirstHourSeconds = 90.0f;
 static constexpr float kHourSeconds = 89.0f;
 static constexpr float kDoorSpeed = 5.0f;        // door animation, 1/seconds
 static constexpr float kTabletSpeed = 4.0f;
@@ -49,7 +52,6 @@ static constexpr int32_t kFoxyBaseAi = 5;      // rolls 1..20 every 5 s; raised 
 // the Show Stage, and rare posters on empty cameras. Rolled when the tablet goes up or the
 // camera changes. Placeholder odds: the real value is in the game's compiled events, not
 // decoded yet.
-static constexpr int32_t kRarePicOdds = 20;
 
 // Main menu timing
 static constexpr float kMenuFrameSeconds = 0.08f;   // Freddy's face frame and flicker
@@ -61,7 +63,31 @@ static constexpr float kGameOverSeconds = 10.0f;        // game over screen, the
 // Foxy
 static constexpr float kFoxyMoveInterval = 5.01f;
 static constexpr float kFoxyArriveSeconds = 25.0f;     // after leaving the cove, if nobody watches the hall
-static constexpr float kFoxyRunFrameSeconds = 1.0f / 20.0f;
+static constexpr float kFoxyRunFrameSeconds = 1.0f / 39.0f;  // animation speed 65 at 60 fps
+static constexpr float kFoxyRunSeconds = 100.0f / 60.0f;  // the original's run: 100 frames at 60 fps
+
+// Load cost of animation frames (jumpscares, Foxy's run): summed while one plays, logged when it ends.
+struct AnimLoadStats
+{
+    uint32_t frames = 0;
+    uint64_t readUs = 0;
+    uint64_t decodeUs = 0;
+    uint64_t worstUs = 0;
+};
+static AnimLoadStats sAnimStats;
+
+void OctLog(const char* format, ...);
+
+static void LogAnimStats(const char* label)
+{
+    if (sAnimStats.frames > 0)
+    {
+        OctLog("FNAF1: %s: %u frames loaded, read avg %.1f ms, decode avg %.1f ms, worst frame %.1f ms", label,
+               sAnimStats.frames, sAnimStats.readUs / 1000.0f / sAnimStats.frames,
+               sAnimStats.decodeUs / 1000.0f / sAnimStats.frames, sAnimStats.worstUs / 1000.0f);
+    }
+    sAnimStats = AnimLoadStats();
+}
 
 struct CameraInfo
 {
@@ -167,7 +193,9 @@ void FnafGame::QueueLoadJobs()
     // the disc and are read when shown (see ShowImage), to keep RAM free for the sounds.
     // The office pictures (~300 KB, swapped every time the lights flash) and the static
     // frames, which animate all the time, are kept in RAM.
-    for (const char* office : { "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark", "office_freddy_dark" })
+    // So are CAM 2A's three pictures, which the hall light's flicker swaps several times a second.
+    for (const char* office : { "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark", "office_freddy_dark",
+                                "cam2a_dark", "cam2a_empty", "cam2a_bonnie" })
     {
         queueImage(office);
     }
@@ -435,6 +463,12 @@ void FnafGame::StartNight()
     mChica.mName = "chica";
     mChica.mLeftSide = false;
     mChica.mMoveInterval = 4.98f;
+    for (Animatronic* a : { &mBonnie, &mChica })
+    {
+        a->mPose = 1;
+        a->mAttackArmed = false;
+        a->mTabletUpInside = 0.0f;
+    }
 
     mFoxyStage = 0;
     mFoxyMoveTimer = 0.0f;
@@ -444,6 +478,8 @@ void FnafGame::StartNight()
     mFoxyRunFrame = 0;
     mFoxyRunFrameTimer = 0.0f;
     mFoxyKnocks = 0;
+    mFoxyAtDoor = false;
+    mRandomForPic = 0;      // the original's counter starts at 0 and is only rolled when the tablet goes down
 
     mOfficeShown.clear();
     mCameraShown.clear();
@@ -589,7 +625,7 @@ void FnafGame::Update(float deltaTime)
 void FnafGame::UpdatePlaying(float deltaTime)
 {
     mNightTime += deltaTime;
-    const int32_t hour = (int32_t)(mNightTime / kHourSeconds);
+    const int32_t hour = (mNightTime < kFirstHourSeconds) ? 0 : 1 + (int32_t)((mNightTime - kFirstHourSeconds) / kHourSeconds);
     if (hour != mHour)
     {
         mHour = hour;
@@ -663,8 +699,11 @@ void FnafGame::UpdatePlaying(float deltaTime)
             if ((rand() % 2) == 0)
             {
                 static const char* kPots[] = { "pots1", "pots2", "pots3", "pots4", "pots4" };
+                // Channel volume 10 with the cameras down, 20 on another camera, 75 on CAM 6
+                // (channel volume 25 is our 0.6, the fan).
                 const bool watchingKitchen = mTabletUp && (Room)mCameraIndex == Room::Kitchen;
-                PlaySound(kPots[rand() % 5], false, watchingKitchen ? 0.9f : 0.25f);
+                const int32_t channelVolume = watchingKitchen ? 75 : (mTabletUp ? 20 : 10);
+                PlaySound(kPots[rand() % 5], false, channelVolume * 0.024f);
             }
         }
     }
@@ -673,21 +712,21 @@ void FnafGame::UpdatePlaying(float deltaTime)
         mPotsTimer = 4.0f;
     }
 
-    // Every 10 s, a 1/50 chance of a faint door pounding (the original plays it on a channel at
-    // volume 10), so it can happen right at the start of the night.
+    // Every 10 s, a 1/50 chance of a door pounding at channel volume 10 + Random(40), so it can
+    // happen right at the start of the night.
     mPoundingTimer -= deltaTime;
     if (mPoundingTimer <= 0.0f)
     {
         mPoundingTimer += 10.0f;
         if ((rand() % 50) == 0)
         {
-            PlaySound("knock", false, 0.15f);
+            PlaySound("knock", false, (10 + rand() % 40) * 0.024f);
         }
     }
 
-    // Every 5 s while Bonnie or Chica is in the office ("got you"), a 1/3 chance of one of
-    // the 4 groaning sounds.
-    if (IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office))
+    // Every 5 s while Bonnie or Chica is in the office ("got you") and the cameras are up, a 1/3
+    // chance of one of the 4 groaning sounds.
+    if (mTabletUp && (IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office)))
     {
         mGroanTimer -= deltaTime;
         if (mGroanTimer <= 0.0f)
@@ -730,7 +769,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
         mCircusTimer += 5.0f;
         if ((rand() % 30) == 0 && !mRareMusic.IsPlaying())
         {
-            mRareMusic.Start("snd/circus.pcm", (uint32_t)mCounts["size_circus"], false, 0.15f);   // faint, far away
+            mRareMusic.Start("snd/circus.pcm", (uint32_t)mCounts["size_circus"], false, 0.12f);   // channel volume 5: faint, far away
             mRareMusicIsPirate = false;
         }
     }
@@ -777,7 +816,8 @@ void FnafGame::UpdatePlaying(float deltaTime)
     mUsage = 1;
     for (const Door& door : mDoors)
     {
-        mUsage += door.mClosed ? 1 : 0;
+        // A door counts once it's fully shut, and until it's fully open again.
+        mUsage += (door.mClosed ? door.mProgress >= 1.0f : door.mProgress > 0.0f) ? 1 : 0;
         mUsage += door.mLight ? 1 : 0;
     }
     mUsage += mTabletUp ? 1 : 0;
@@ -821,15 +861,16 @@ void FnafGame::StartPowerOut()
     mPowerOutRollTimer = 0.0f;
     mFreddyFaceOn = false;
     mFreddyFlickerTimer = 0.0f;
+    mPowerOutFlickerDark = false;
     OctLog("FNAF1: power out");
 }
 
 void FnafGame::UpdatePowerOut(float deltaTime)
 {
-    // Power-out, as in the original: the office goes dark and the doors open; after a while
-    // Freddy's face flickers in the left doorway to the music box; the music stops, it goes
-    // pitch black with footsteps, and he attacks. Each step rolls a chance every few seconds,
-    // with a cap (timings are estimates, not decoded from the original's events).
+    // Power-out, from the original's events: the office goes dark and the doors open; the music
+    // box starts and Freddy's face flickers in the left doorway; the music stops and the lights
+    // flicker out; then silent darkness until he attacks. Each step rolls a 1-in-5 chance at a
+    // fixed interval, or happens for sure after 20 s.
     mPowerOutTimer += deltaTime;
     mPowerOutPhaseTimer += deltaTime;
     mPowerOutRollTimer += deltaTime;
@@ -862,37 +903,55 @@ void FnafGame::UpdatePowerOut(float deltaTime)
 
     switch (mPowerOutPhase)
     {
-    case 0:     // dark office, waiting for Freddy
-        // The power-down sound winds down, then the music box starts right away.
-        if (!mJingle.IsPlaying())
+    case 0:     // dark office: the music box starts on a 1-in-5 roll every 5 s, or after 20 s
+        if (roll(5.0f, 5, 20.0f))
         {
             mPowerOutPhase = 1;
             mPowerOutPhaseTimer = 0.0f;
             mPowerOutRollTimer = 0.0f;
+            mFreddyFlickerTimer = 0.0f;
             mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], true, 0.8f);
         }
         break;
 
-    case 1:     // music box: his face flickers in the left doorway
+    case 1:     // music box: every 50 ms, a 1-in-4 chance his face shows in the left doorway
         mFreddyFlickerTimer -= deltaTime;
-        if (mFreddyFlickerTimer <= 0.0f)
+        while (mFreddyFlickerTimer <= 0.0f)
         {
-            mFreddyFaceOn = (rand() % 100) < 60;
-            mFreddyFlickerTimer = 0.05f + (rand() % 20) / 100.0f;
+            mFreddyFlickerTimer += 0.05f;
+            mFreddyFaceOn = (rand() % 4) == 0;
         }
+        // The music ends on a 1-in-5 roll every 5 s, or after 20 s.
         if (roll(5.0f, 5, 20.0f))
         {
             mPowerOutPhase = 2;
             mPowerOutPhaseTimer = 0.0f;
             mPowerOutRollTimer = 0.0f;
             mFreddyFaceOn = false;
+            // Everything stops, and the fluorescent buzz comes back while the lights flicker out.
             mMusicBox.Stop();
-            PlaySound("steps", false, 0.8f);
+            mAmbience.Stop();
+            mJingle.Stop();
+            mFanSound.Start("snd/fan.pcm", (uint32_t)mCounts["size_fan"], true, 1.2f);
         }
         break;
 
-    default:    // pitch black, footsteps, then the jumpscare
-        if (roll(2.0f, 5, 10.0f))
+    case 2:     // lights flicker out: each frame a coin flip between the dark office with the buzz
+                // and black silence, for 21 frames (at the original's 60 fps)
+        mPowerOutFlickerDark = (rand() % 2) == 0;
+        mFanSound.SetVolume(mPowerOutFlickerDark ? 0.0f : 1.2f);
+        if (mPowerOutPhaseTimer >= 21.0f / 60.0f)
+        {
+            mPowerOutPhase = 3;
+            mPowerOutPhaseTimer = 0.0f;
+            mPowerOutRollTimer = 0.0f;
+            mPowerOutFlickerDark = true;
+            mFanSound.Stop();
+        }
+        break;
+
+    default:    // silent darkness: the jumpscare comes on a 1-in-5 roll every 2 s, or after 20 s
+        if (roll(2.0f, 5, 20.0f))
         {
             StartJumpscare("freddy");
         }
@@ -912,10 +971,9 @@ void FnafGame::UpdateInput(float deltaTime)
         }
     }
 
-    const bool intruder = IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office);
-
-    // B mutes the phone call, like the original's "mute call" button.
-    if (Pressed(GAMEPAD_B) && mCall.IsPlaying())
+    // B mutes the phone call, like the original's "mute call" button, which shows 20 s into the
+    // night and goes away at 40 s.
+    if (Pressed(GAMEPAD_B) && mCall.IsPlaying() && mNightTime >= 20.0f && mNightTime <= 40.0f)
     {
         mCall.Stop();
     }
@@ -926,7 +984,8 @@ void FnafGame::UpdateInput(float deltaTime)
         PlaySound("honk");
     }
 
-    if (Pressed(GAMEPAD_A))
+    // The tablet can't come up while Foxy is at the door (the original's progress 5).
+    if (Pressed(GAMEPAD_A) && !(mFoxyAtDoor && !mTabletUp))
     {
         mTabletUp = !mTabletUp;
         mTabletUpTime = 0.0f;
@@ -937,18 +996,16 @@ void FnafGame::UpdateInput(float deltaTime)
             // its own channel and turns the fan's channel down (to 10, from 25).
             mTapeSound.Start("snd/minidv.pcm", (uint32_t)mCounts["size_minidv"], false, 1.0f);
             mFanSound.SetVolume(0.24f);
+            mCall.SetVolume(0.5f);          // the call's channel goes from 100 to 50 with the cameras up
             SetLight(true, false);
             SetLight(false, false);
             mStaticTimer = kStaticSeconds;
-            mRandomForPic = (rand() % kRarePicOdds) + 1;
-            mRareVariant = rand() % 4;
             mCameraFresh = true;
         }
         else
         {
-            PlaySound("tablet");
-            mTapeSound.Stop();              // the original mutes its channel when the cameras close
-            mFanSound.SetVolume(0.6f);
+            mTabletUp = true;   // LowerTablet() expects it up
+            LowerTablet();
         }
     }
 
@@ -963,8 +1020,6 @@ void FnafGame::UpdateInput(float deltaTime)
             {
                 mCameraIndex = (mCameraIndex + step + kNumCameras) % kNumCameras;
                 mStaticTimer = kStaticSeconds;
-                mRandomForPic = (rand() % kRarePicOdds) + 1;
-                mRareVariant = rand() % 4;
                 mCameraFresh = true;
                 PlaySound("blip");
                 OctLog("FNAF1: camera %s", kCameras[mCameraIndex].mId);
@@ -973,31 +1028,57 @@ void FnafGame::UpdateInput(float deltaTime)
         return;
     }
 
-    // Doors: L / R. Lights: D-pad left / right. The controls stop working once
-    // someone is inside the office.
-    if (intruder)
-    {
-        // The buttons are dead: they just buzz.
-        if (Pressed(GAMEPAD_L1) || Pressed(GAMEPAD_R1) || Pressed(GAMEPAD_LEFT) || Pressed(GAMEPAD_RIGHT))
-        {
-            PlaySound("error");
-        }
-        return;
-    }
-
+    // Doors: L / R. Lights: D-pad left / right.
     for (int32_t side = 0; side < 2; ++side)
     {
-        if (Pressed(side == 0 ? GAMEPAD_L1 : GAMEPAD_R1))
+        // Foxy at an open left door: the original hides that door's buttons.
+        if (side == 0 && mFoxyAtDoor && !mDoors[0].mClosed)
         {
-            mDoors[side].mClosed = !mDoors[side].mClosed;
+            continue;
+        }
+
+        const bool doorPressed = Pressed(side == 0 ? GAMEPAD_L1 : GAMEPAD_R1);
+        const bool lightPressed = Pressed(side == 0 ? GAMEPAD_LEFT : GAMEPAD_RIGHT);
+
+        // Bonnie inside kills the left side's buttons and Chica the right's: they just buzz.
+        if (IsAt(side == 0 ? mBonnie : mChica, Room::Office))
+        {
+            if (doorPressed || lightPressed)
+            {
+                PlaySound("error");
+            }
+            continue;
+        }
+
+        // A door only responds once it has finished opening or closing.
+        Door& door = mDoors[side];
+        if (doorPressed && door.mProgress == (door.mClosed ? 1.0f : 0.0f))
+        {
+            door.mClosed = !door.mClosed;
             PlaySound("door");
         }
 
-        if (Pressed(side == 0 ? GAMEPAD_LEFT : GAMEPAD_RIGHT))
+        if (lightPressed)
         {
-            SetLight(side == 0, !mDoors[side].mLight);
+            SetLight(side == 0, !door.mLight);
         }
     }
+}
+
+void FnafGame::LowerTablet()
+{
+    if (!mTabletUp)
+    {
+        return;
+    }
+
+    mTabletUp = false;
+    mTabletUpTime = 0.0f;
+    PlaySound("tablet");
+    mTapeSound.Stop();              // the original mutes its channel when the cameras close
+    mFanSound.SetVolume(0.6f);
+    mCall.SetVolume(1.0f);
+    mRandomForPic = (rand() % 100) + 1;   // the original re-rolls "random for pic" as the tablet goes down
 }
 
 void FnafGame::UpdateTablet(float deltaTime)
@@ -1008,10 +1089,10 @@ void FnafGame::UpdateTablet(float deltaTime)
     else if (mTabletProgress > target)
         mTabletProgress = glm::max(target, mTabletProgress - deltaTime * kTabletSpeed);
 
+    mCameraPanTime += deltaTime;    // the original's camera sweep runs all night
     if (mTabletUp)
     {
         mTabletUpTime += deltaTime;
-        mCameraPanTime += deltaTime;
     }
 
     for (Door& door : mDoors)
@@ -1051,17 +1132,24 @@ void FnafGame::UpdateAnimatronics(float deltaTime)
 
         if (a->mRoom == Room::Office)
         {
-            // Inside: they wait for the tablet to go down, and pull it down if you
-            // keep looking at the cameras.
+            // Inside ("got you"), as in the original: her side's light goes out, and nothing
+            // happens until you've had the cameras up with her in the room. Lowering them then
+            // starts the jumpscare; keeping them up for 30 s pulls them down.
             a->mOfficeTimer += deltaTime;
-            if (mTabletUp && mTabletUpTime > 3.0f)
+            if (mDoors[side].mLight)
             {
-                mTabletUp = false;
-                PlaySound("tablet");
-                mTapeSound.Stop();
-                mFanSound.SetVolume(0.6f);
+                SetLight(a->mLeftSide, false);
             }
-            if (!mTabletUp && mTabletProgress <= 0.0f && a->mOfficeTimer > 0.8f)
+            if (mTabletUp)
+            {
+                a->mAttackArmed = true;
+                a->mTabletUpInside += deltaTime;
+                if (a->mTabletUpInside >= 30.0f)
+                {
+                    LowerTablet();
+                }
+            }
+            else if (a->mAttackArmed && mTabletProgress <= 0.0f)
             {
                 StartJumpscare(a->mName);
                 return;
@@ -1093,6 +1181,28 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
     const bool coin = (rand() & 1) != 0;
     const Room before = a.mRoom;
 
+    // Feed cut when someone moves on the camera you're watching. In the original a successful move
+    // roll sets a 10-frame flag before the move events run, and the camera check tests where she is:
+    // her old spot on that frame (even if the move is then blocked), her new one on the next frames.
+    // It hides the picture for 300 frames at 60 fps (only the faint static shows), keeps counting
+    // on other cameras and with the tablet down, and brings the picture straight back.
+    auto cutFeedIfWatched = [this](Room room)
+    {
+        const bool cameraOn = mTabletUp && mTabletProgress >= 1.0f;
+        if (cameraOn && room == (Room)mCameraIndex)
+        {
+            mCameraCutTimer = 5.0f;
+            // Random(4) + 1: 1 plays COMPUTER_DIGITAL, 2-4 play garble1-3.
+            const int32_t roll = (rand() % 4) + 1;
+            static const char* kMoveSounds[] = { "camhum", "garble1", "garble2", "garble3" };
+            PlaySound(kMoveSounds[roll - 1], false, 0.7f);
+            return true;
+        }
+        return false;
+    };
+    const bool cutOnLeaving = cutFeedIfWatched(before);
+    a.mPose = (rand() % 2) + 1;     // the original re-rolls her camera pose on every move roll
+
     if (a.mLeftSide)
     {
         switch (a.mRoom)
@@ -1101,7 +1211,7 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         case Room::DiningArea:   a.mRoom = coin ? Room::Backstage : Room::WestHall; break;
         case Room::Backstage:    a.mRoom = coin ? Room::DiningArea : Room::WestHall; break;
         case Room::WestHall:     a.mRoom = coin ? Room::SupplyCloset : Room::WestCorner; break;
-        case Room::SupplyCloset: a.mRoom = coin ? Room::WestCorner : Room::LeftDoor; break;
+        case Room::SupplyCloset: a.mRoom = coin ? Room::LeftDoor : Room::WestHall; break;
         case Room::WestCorner:   a.mRoom = coin ? Room::LeftDoor : Room::SupplyCloset; break;
         case Room::LeftDoor:     a.mRoom = mDoors[0].mClosed ? Room::DiningArea : Room::Office; break;
         default: break;
@@ -1115,7 +1225,7 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         case Room::DiningArea: a.mRoom = coin ? Room::Restrooms : Room::Kitchen; break;
         case Room::Restrooms:  a.mRoom = coin ? Room::Kitchen : Room::EastHall; break;
         case Room::Kitchen:    a.mRoom = coin ? Room::Restrooms : Room::EastHall; break;
-        case Room::EastHall:   a.mRoom = coin ? Room::EastCorner : Room::Kitchen; break;
+        case Room::EastHall:   a.mRoom = coin ? Room::DiningArea : Room::EastCorner; break;
         case Room::EastCorner: a.mRoom = coin ? Room::RightDoor : Room::EastHall; break;
         case Room::RightDoor:  a.mRoom = mDoors[1].mClosed ? Room::EastHall : Room::Office; break;
         default: break;
@@ -1135,37 +1245,38 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         a.mSeenAtDoor = false;
         a.mOfficeTimer = 0.0f;
 
-        // Moving on the camera you're watching cuts that feed to static for 5 s (the original
-        // counts 300 frames at 60 fps with the picture hidden) and rolls a garble:
-        // Random(4) + 1, where 2-4 play one of the three and 1 plays nothing.
-        const bool cameraOn = mTabletUp && mTabletProgress >= 1.0f;
-        const Room watched = (Room)mCameraIndex;
-        if (cameraOn && (before == watched || a.mRoom == watched))
+        // Arriving on the camera you're watching (leaving it was checked above).
+        if (!cutOnLeaving)
         {
-            mCameraCutTimer = 5.0f;
-            // Random(4) + 1: 1 plays COMPUTER_DIGITAL, 2-4 play garble1-3.
-            const int32_t roll = (rand() % 4) + 1;
-            static const char* kMoveSounds[] = { "camhum", "garble1", "garble2", "garble3" };
-            PlaySound(kMoveSounds[roll - 1], false, 0.7f);
+            cutFeedIfWatched(a.mRoom);
         }
-        // Footsteps as they close in, louder the nearer they get (the original plays its
-        // "deep steps" at 10-40% depending on where they are).
-        float steps = 0.0f;
-        switch (a.mRoom)
+        // Footsteps ("deep steps"): the original plays them on every move except getting in, at a
+        // channel volume set by the room she left (10 far away .. 40 close), and mutes that
+        // channel while you watch the camera she's on. Channel volume 25 is our 0.6 (the fan).
+        int32_t stepsVolume = 0;
+        switch (before)
         {
+        case Room::ShowStage:
+        case Room::Backstage:    stepsVolume = 10; break;
+        case Room::DiningArea:   stepsVolume = a.mLeftSide ? 20 : 10; break;
+        case Room::Kitchen:      stepsVolume = (a.mRoom == Room::Restrooms) ? 10 : 20; break;
+        case Room::Restrooms:    stepsVolume = 20; break;
         case Room::WestHall:
-        case Room::EastHall:     steps = 0.25f; break;
+        case Room::SupplyCloset:
+        case Room::EastHall:
+        case Room::LeftDoor:     stepsVolume = 30; break;
         case Room::WestCorner:
-        case Room::EastCorner:   steps = 0.35f; break;
-        case Room::LeftDoor:
-        case Room::RightDoor:
-        case Room::Office:       steps = 0.5f; break;
+        case Room::EastCorner:
+        case Room::RightDoor:    stepsVolume = 40; break;
         default:                 break;
         }
-        if (steps > 0.0f)
+        const bool watchingHer = mTabletUp && mTabletProgress >= 1.0f && a.mRoom == (Room)mCameraIndex;
+        if (a.mRoom != Room::Office && stepsVolume > 0 && !watchingHer)
         {
-            PlaySound("steps", false, steps);
+            PlaySound("steps", false, stepsVolume * 0.024f);
         }
+        a.mAttackArmed = false;
+        a.mTabletUpInside = 0.0f;
         LogDebug("FNAF1: %s moved to room %d", a.mName, (int)a.mRoom);
     }
 }
@@ -1174,6 +1285,40 @@ void FnafGame::UpdateFoxy(float deltaTime)
 {
     if (mState != State::Playing)
     {
+        return;
+    }
+
+    if (mFoxyAtDoor)
+    {
+        // At the left door (the original's progress 5): the cameras are forced down and the lights
+        // go off. Nothing happens until the tablet is fully down and the door isn't moving.
+        LowerTablet();
+        if (mDoors[0].mLight || mDoors[1].mLight)
+        {
+            SetLight(true, false);
+            SetLight(false, false);
+        }
+
+        const Door& door = mDoors[0];
+        if (mTabletProgress > 0.0f || door.mProgress != (door.mClosed ? 1.0f : 0.0f))
+        {
+            return;
+        }
+        mFoxyAtDoor = false;
+
+        if (door.mClosed)
+        {
+            // Bangs on the door (knock2, much louder than the random knock), drains 10 + 50 x bangs
+            // of the original's 999 power (1%, 6%, 11%, ...) and goes back to curtain stage 0 or 1.
+            PlaySound("foxybang", false, 1.0f);
+            mPower = glm::max(0.0f, mPower - (1.0f + 5.0f * mFoxyKnocks));
+            mFoxyKnocks++;
+            mFoxyStage = rand() % 2;
+            OctLog("FNAF1: foxy banged (%d), back to stage %d, power %.0f", mFoxyKnocks, mFoxyStage, mPower);
+            return;
+        }
+
+        StartJumpscare("foxy");
         return;
     }
 
@@ -1186,8 +1331,10 @@ void FnafGame::UpdateFoxy(float deltaTime)
             mFoxyRunFrameTimer -= kFoxyRunFrameSeconds;
             mFoxyRunFrame++;
         }
-        if (mFoxyRunFrame >= mCounts["foxyrun"])
+        mFoxyRunTimer += deltaTime;
+        if (mFoxyRunTimer >= kFoxyRunSeconds)
         {
+            LogAnimStats("foxy run");
             FoxyArrive();
         }
         return;
@@ -1198,7 +1345,7 @@ void FnafGame::UpdateFoxy(float deltaTime)
         // Watching the cameras keeps him in the cove, and he stays put for a while after.
         if (mTabletUp)
         {
-            mFoxyLockTimer = 0.83f + (rand() % 1584) / 100.0f;
+            mFoxyLockTimer = (50 + rand() % 1000) / 60.0f;   // the original: 50 + Random(1000) frames
             return;
         }
 
@@ -1216,10 +1363,10 @@ void FnafGame::UpdateFoxy(float deltaTime)
             if ((rand() % 20) + 1 <= ai)
             {
                 mFoxyStage++;
-                LogDebug("FNAF1: foxy stage %d", mFoxyStage);
+                OctLog("FNAF1: foxy stage %d (hour %d)", mFoxyStage, mHour);
                 if (mFoxyStage == 3)
                 {
-                    mFoxyRunTimer = kFoxyArriveSeconds;
+                    mFoxyRunTimer = 0.0f;
                 }
             }
         }
@@ -1230,39 +1377,31 @@ void FnafGame::UpdateFoxy(float deltaTime)
     const bool watchingWestHall = mTabletUp && mTabletProgress >= 1.0f && (Room)mCameraIndex == Room::WestHall;
     if (watchingWestHall)
     {
+        OctLog("FNAF1: foxy runs (seen on CAM 2A)");
         mFoxyRunning = true;
+        mFoxyRunTimer = 0.0f;
         mFoxyRunFrame = 0;
         mFoxyRunFrameTimer = 0.0f;
         PlaySound("run");
         return;
     }
 
-    mFoxyRunTimer -= deltaTime;
-    if (mFoxyRunTimer <= 0.0f)
+    // Not seen: 1500 frames (25 s) after leaving, whatever the cameras show, he's at the door
+    // without the run.
+    mFoxyRunTimer += deltaTime;
+    if (mFoxyRunTimer >= kFoxyArriveSeconds)
     {
-        PlaySound("run");
         FoxyArrive();
     }
 }
 
 void FnafGame::FoxyArrive()
 {
+    OctLog("FNAF1: foxy at the left door (%s, door %s, tablet %s, camera %s, power %.0f)",
+           mFoxyRunning ? "after the run" : "25 s timer", mDoors[0].mClosed ? "closed" : "open",
+           mTabletUp ? "up" : "down", kCameras[mCameraIndex].mId, mPower);
     mFoxyRunning = false;
-
-    if (mDoors[0].mClosed)
-    {
-        // Bangs on the door (the original's knock2, much louder than the random knock), drains
-        // power (more each time), and goes back to the cove.
-        PlaySound("foxybang", false, 1.0f);
-        mPower = glm::max(0.0f, mPower - (1.0f + 5.0f * mFoxyKnocks));
-        mFoxyKnocks++;
-        mFoxyStage = rand() % 2;
-        mFoxyMoveTimer = 0.0f;
-        LogDebug("FNAF1: foxy knocked (%d)", mFoxyKnocks);
-        return;
-    }
-
-    StartJumpscare("foxy");
+    mFoxyAtDoor = true;     // resolved in UpdateFoxy once the tablet is down
 }
 
 void FnafGame::SetLight(bool left, bool on)
@@ -1320,10 +1459,21 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     const int32_t frames = mCounts["jump_" + mJumpWho];
     mJumpTimer += deltaTime;
 
-    if (mJumpTimer >= kJumpFrameSeconds && mJumpFrame + 1 < frames)
+    // The original's animation speeds at 60 fps: Bonnie 75 (45 fps), Chica 99 (59 fps), Foxy 50
+    // (30 fps), Freddy's power-out lunge 60 (36 fps).
+    float fps = 24.0f;
+    if (mJumpWho == "bonnie")       fps = 45.0f;
+    else if (mJumpWho == "chica")   fps = 59.4f;
+    else if (mJumpWho == "foxy")    fps = 30.0f;
+    else if (mJumpWho == "freddy")  fps = 36.0f;
+    const float frameSeconds = 1.0f / fps;
+    if (mJumpTimer >= frameSeconds && mJumpFrame + 1 < frames)
     {
-        mJumpTimer = 0.0f;
-        mJumpFrame++;
+        // Advance by the time that passed, skipping frames when loading one took longer than a
+        // frame (reading and decoding a frame on the GameCube can), so the scare keeps its length.
+        const int32_t steps = (int32_t)(mJumpTimer / frameSeconds);
+        mJumpTimer -= steps * frameSeconds;
+        mJumpFrame = glm::min(mJumpFrame + steps, frames - 1);
         char name[64];
         snprintf(name, sizeof(name), "jump_%s_%02d", mJumpWho.c_str(), mJumpFrame);
         std::string shown;
@@ -1332,6 +1482,7 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     else if (mJumpFrame + 1 >= frames && mJumpTimer > 0.6f)
     {
         // Game over: full-screen static with its sound, then the game over screen.
+        LogAnimStats(("jumpscare " + mJumpWho).c_str());
         mJump->SetVisible(false);
         AudioManager::StopAllSounds();      // the scream ends with the animation
         mState = State::GameOver;
@@ -1350,6 +1501,10 @@ std::string FnafGame::GetOfficeImage() const
     if (mState == State::PowerOut)
         return (mPowerOutPhase == 1 && mFreddyFaceOn) ? "office_freddy_dark" : "office_dark";
 
+    // A hall light drops out for a moment now and then (the original: 1 frame in 10).
+    if ((mDoors[0].mLight || mDoors[1].mLight) && mLightDropout)
+        return "office";
+
     if (mDoors[0].mLight)
         return IsAt(mBonnie, Room::LeftDoor) ? "office_bonnie" : "office_light_l";
 
@@ -1362,64 +1517,84 @@ std::string FnafGame::GetOfficeImage() const
 float FnafGame::GetPirateSongVolume() const
 {
     const bool watchingCove = mTabletUp && mTabletProgress >= 1.0f && (Room)mCameraIndex == Room::PirateCove;
-    return watchingCove ? 0.6f : 0.12f;
+    return watchingCove ? 0.36f : 0.12f;    // channel volume 15 while watching CAM 1C, 5 otherwise
 }
 
 std::string FnafGame::GetCameraImage(Room camera) const
 {
+    // Pictures as the original's events pick them. "random for pic" (1..100) is rolled each time
+    // the tablet goes down; Bonnie's and Chica's poses (1 or 2) on every move roll.
     const bool bonnie = IsAt(mBonnie, camera);
     const bool chica = IsAt(mChica, camera);
+    const int32_t pic = mRandomForPic;
 
     switch (camera)
     {
     case Room::ShowStage:
         if (bonnie && chica) return "cam1a_all";
-        if (bonnie) return "cam1a_no_chica";
         if (chica) return "cam1a_no_bonnie";
-        return (mRandomForPic == 1) ? "cam1a_freddy_stare" : "cam1a_freddy";
-    case Room::DiningArea:   return bonnie ? "cam1b_bonnie" : (chica ? "cam1b_chica" : "cam1b_empty");
+        if (bonnie) return "cam1a_no_chica";
+        return (pic <= 10) ? "cam1a_freddy_stare" : "cam1a_freddy";
+    case Room::DiningArea:
+        // Chica wins when both are there.
+        if (chica) return (mChica.mPose == 1) ? "cam1b_chica2" : "cam1b_chica";
+        if (bonnie) return (mBonnie.mPose == 1) ? "cam1b_bonnie" : "cam1b_bonnie2";
+        return "cam1b_empty";
     case Room::PirateCove:
     {
-        // Curtains closed: rarely, an "IT'S ME" sign instead of the usual one.
-        if (mFoxyStage <= 0 && mRandomForPic == 1)
+        // Gone from the cove (also while he runs or is at the door): the empty stage, or the
+        // "IT'S ME" sign when the roll is 10 or less.
+        if (mFoxyStage >= 3)
         {
-            return "cam1c_rare_itsme";
+            return (pic <= 10) ? "cam1c_rare_itsme" : "cam1c_3";
         }
 
         char name[16];
-        snprintf(name, sizeof(name), "cam1c_%d", glm::clamp(mFoxyStage, 0, 3));
+        snprintf(name, sizeof(name), "cam1c_%d", glm::clamp(mFoxyStage, 0, 2));
         return name;
     }
-    case Room::Backstage:    return bonnie ? "cam5_bonnie" : "cam5_empty";
-    case Room::Restrooms:    return chica ? "cam7_chica" : "cam7_empty";
+    case Room::Backstage:
+        if (bonnie) return (pic <= 10) ? "cam5_bonnie_stare" : "cam5_bonnie";
+        return (pic <= 5) ? "cam5_rare" : "cam5_empty";
+    case Room::Restrooms:
+        if (chica) return (mChica.mPose == 1) ? "cam7_chica" : "cam7_chica2";
+        return "cam7_empty";
     case Room::Kitchen:      return "";
     case Room::WestHall:
         if (mFoxyRunning)
         {
             char name[24];
-            snprintf(name, sizeof(name), "foxyrun_%02d", glm::clamp(mFoxyRunFrame, 0, glm::max(0, mCounts.at("foxyrun") - 1)));
+            // After the last frame the original's run animation loops its last two frames
+            // (the empty hall at the end) until he reaches the door.
+            const int32_t runFrames = glm::max(1, mCounts.at("foxyrun"));
+            int32_t frame = mFoxyRunFrame;
+            if (frame >= runFrames)
+            {
+                frame = (runFrames >= 2) ? runFrames - 2 + ((frame - runFrames) % 2) : runFrames - 1;
+            }
+            snprintf(name, sizeof(name), "foxyrun_%02d", frame);
             return name;
         }
+        // Dark, except on the flicker steps when the light catches the hall (and Bonnie).
+        if (!mHallLit) return "cam2a_dark";
         return bonnie ? "cam2a_bonnie" : "cam2a_empty";
     case Room::SupplyCloset: return bonnie ? "cam3_bonnie" : "cam3_empty";
-    // Rare posters: roll 1 or 2 swaps an empty camera's poster.
+    // Rare pictures on empty cameras, by the roll.
     case Room::WestCorner:
         if (bonnie) return "cam2b_bonnie";
-        if (mRandomForPic == 1) return "cam2b_rare_freddy";
-        if (mRandomForPic == 2) return "cam2b_rare_golden";
-        return "cam2b_empty";
+        return (pic < 2) ? "cam2b_rare_freddy" : "cam2b_empty";
     case Room::EastHall:
-        if (chica) return "cam4a_chica";
-        if (mRandomForPic == 1) return "cam4a_rare_faces";
-        if (mRandomForPic == 2) return "cam4a_rare_itsme";
+        if (chica) return (mChica.mPose == 1) ? "cam4a_chica" : "cam4a_chica2";
+        if (pic == 99) return "cam4a_rare_faces";
+        if (pic == 100) return "cam4a_rare_itsme";
         return "cam4a_empty";
     case Room::EastCorner:
         if (chica) return "cam4b_chica";
-        if (mRandomForPic == 1)
+        if (pic >= 97)
         {
-            // One of four newspaper clippings.
+            // One of four newspaper clippings: 97, 98, 99 or 100.
             static const char* kNews[] = { "cam4b_rare_news0", "cam4b_rare_news1", "cam4b_rare_news2", "cam4b_rare_news3" };
-            return kNews[glm::clamp(mRareVariant, 0, 3)];
+            return kNews[glm::clamp(pic - 97, 0, 3)];
         }
         return "cam4b_empty";
     default:                 return "";
@@ -1444,9 +1619,21 @@ void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string
     }
 
     // Backgrounds and animation frames (jumpscares, Foxy's run) are read from the disc when shown.
-    if (ReadDataFile("img/" + name + ".jpg", mFrameBuffer) && canvas.Show(mFrameBuffer))
+    const uint64_t startUs = SYS_GetTimeMicroseconds();
+    const bool read = ReadDataFile("img/" + name + ".jpg", mFrameBuffer);
+    const uint64_t readUs = SYS_GetTimeMicroseconds();
+    if (read && canvas.Show(mFrameBuffer))
     {
         shown = name;
+    }
+    const uint64_t endUs = SYS_GetTimeMicroseconds();
+
+    if (name.compare(0, 5, "jump_") == 0 || name.compare(0, 8, "foxyrun_") == 0)
+    {
+        sAnimStats.frames++;
+        sAnimStats.readUs += readUs - startUs;
+        sAnimStats.decodeUs += endUs - readUs;
+        sAnimStats.worstUs = glm::max(sAnimStats.worstUs, endUs - startUs);
     }
 }
 
@@ -1455,6 +1642,18 @@ void FnafGame::UpdateView(float deltaTime)
     const float scale = mScreenHeight / kOfficeHeight;
     const float officeWidth = kOfficeWidth * scale;
     const float panX = mOfficePan * glm::max(0.0f, officeWidth - mScreenWidth);
+
+    // Flicker rolls. The original rolls these every frame at 60 fps: the West Hall (CAM 2A) is lit
+    // on 3 frames in 10 (only then can Bonnie be seen there), and a hall light drops out 1 frame in
+    // 10. Every change means decoding another picture, which costs a GameCube frame or two, so we
+    // roll every 100 ms instead.
+    mFlickerTimer -= deltaTime;
+    if (mFlickerTimer <= 0.0f)
+    {
+        mFlickerTimer += 0.1f;
+        mHallLit = (rand() % 10) < 3;
+        mLightDropout = (rand() % 10) == 0;
+    }
 
     // Office, fan, doors and buttons
     ShowImage(mOfficeCanvas, GetOfficeImage(), mOfficeShown);
@@ -1505,7 +1704,8 @@ void FnafGame::UpdateView(float deltaTime)
     // While the feed is cut after someone moved, only the static shows.
     mCamera->SetVisible(cameraOn && !cameraImage.empty() && mCameraCutTimer <= 0.0f);
     // Black for the audio-only Kitchen camera, and for the pitch-black end of a power-out.
-    mCameraBlack->SetVisible((cameraOn && cameraImage.empty()) || (mState == State::PowerOut && mPowerOutPhase == 2));
+    mCameraBlack->SetVisible((cameraOn && (cameraImage.empty() || mCameraCutTimer > 0.0f)) ||
+                             (mState == State::PowerOut && (mPowerOutPhase == 3 || (mPowerOutPhase == 2 && mPowerOutFlickerDark))));
     if (cameraOn && !cameraImage.empty())
     {
         if (cameraImage != mCameraShown)
@@ -1515,16 +1715,21 @@ void FnafGame::UpdateView(float deltaTime)
         }
         mCameraFresh = false;
 
-        // The camera sweeps left to right at a steady speed, holds, sweeps back, and holds.
-        const float kSweep = 4.0f;
-        const float kHold = 1.5f;
+        // The original's camera sweep: 320 frames (at 60 fps) across, a 100-frame hold, 320 back,
+        // a 100-frame hold, running all night. CAM 3 doesn't pan (it stays at the left edge).
+        const float kSweep = 320.0f / 60.0f;
+        const float kHold = 100.0f / 60.0f;
         const float cycle = 2.0f * (kSweep + kHold);
         const float t = fmod(mCameraPanTime, cycle);
         float amount = 0.0f;
-        if (t < kHold)                          amount = 0.0f;
-        else if (t < kHold + kSweep)            amount = (t - kHold) / kSweep;
-        else if (t < 2.0f * kHold + kSweep)     amount = 1.0f;
-        else                                    amount = 1.0f - (t - 2.0f * kHold - kSweep) / kSweep;
+        if (t < kSweep)                         amount = t / kSweep;
+        else if (t < kSweep + kHold)            amount = 1.0f;
+        else if (t < 2.0f * kSweep + kHold)     amount = 1.0f - (t - kSweep - kHold) / kSweep;
+        else                                    amount = 0.0f;
+        if (room == Room::SupplyCloset)
+        {
+            amount = 0.0f;
+        }
         const float pan = amount * glm::max(0.0f, officeWidth - mScreenWidth);
         mCamera->SetRect(-pan, 0.0f, officeWidth, mScreenHeight);
     }
@@ -1559,7 +1764,8 @@ void FnafGame::UpdateView(float deltaTime)
 
         // The original's static: every frame its blend coefficient (0 opaque .. 255 invisible)
         // is 150 + Random(50) + level * 15, with level re-rolled to 0-2 every second. That's
-        // roughly 10-41% opaque. It's solid for the switch burst and while the feed is cut.
+        // roughly 10-41% opaque. It's solid for the switch burst; while the feed is cut the
+        // picture is hidden and this faint static shows over black.
         mStaticLevelTimer -= deltaTime;
         if (mStaticLevelTimer <= 0.0f)
         {
@@ -1567,7 +1773,7 @@ void FnafGame::UpdateView(float deltaTime)
             mStaticLevel = rand() % 3;
         }
         const float coefficient = 150.0f + (float)(rand() % 50) + mStaticLevel * 15.0f;
-        const float alpha = (mStaticTimer > 0.0f || mCameraCutTimer > 0.0f) ? 1.0f : 1.0f - coefficient / 255.0f;
+        const float alpha = (mStaticTimer > 0.0f) ? 1.0f : 1.0f - coefficient / 255.0f;
         mStatic->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, alpha));
     }
 

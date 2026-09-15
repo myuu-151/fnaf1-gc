@@ -2,11 +2,11 @@ door_l 12
 door_r 9
 fan 3
 flip 10
-foxyrun 31
+foxyrun 33
 jump_bonnie 11
 jump_chica 16
 jump_foxy 25
-jump_freddy 18
+jump_freddy 21
 size_ambience 2646000
 size_breath1 139556
 size_breath2 263358
