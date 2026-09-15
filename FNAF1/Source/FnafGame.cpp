@@ -1931,8 +1931,10 @@ void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string
     }
 
     // Backgrounds and animation frames (jumpscares, Foxy's run) are read from the disc when shown.
+    const bool animation = name.compare(0, 5, "jump_") == 0 || name.compare(0, 8, "foxyrun_") == 0;
     const uint64_t startUs = SYS_GetTimeMicroseconds();
-    const bool read = ReadDataFile("img/" + name + ".jpg", mFrameBuffer);
+    const bool read = animation ? ReadAnimationFrame("img/" + name + ".jpg", mFrameBuffer)
+                                : ReadDataFile("img/" + name + ".jpg", mFrameBuffer);
     const uint64_t readUs = SYS_GetTimeMicroseconds();
     if (read && canvas.Show(mFrameBuffer))
     {
@@ -1940,7 +1942,7 @@ void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string
     }
     const uint64_t endUs = SYS_GetTimeMicroseconds();
 
-    if (name.compare(0, 5, "jump_") == 0 || name.compare(0, 8, "foxyrun_") == 0)
+    if (animation)
     {
         sAnimStats.frames++;
         sAnimStats.readUs += readUs - startUs;

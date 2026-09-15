@@ -118,7 +118,7 @@ SOUNDS = {
     "scream": (15, None),        # XSCREAM
     "windowscare": (31, None),
     "steps": (9, None),          # deep steps
-    "run": (55, None),           # running fast3
+    "run": (10, None),           # run: Foxy down the West Hall (#39; 55 "running fast3" is Freddy's)
     "knock": (39, None),         # DOOR_POUNDING_ME: the faint random knock (channel volume 10)
     "foxybang": (27, None),      # knock2: Foxy banging on the closed left door (loud)
     "honk": (36, None),          # PartyFavorraspyPart_AC01__3: Freddy poster's nose

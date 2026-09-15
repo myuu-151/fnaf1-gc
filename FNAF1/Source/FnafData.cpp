@@ -199,6 +199,7 @@ uint32_t GetFreeMemoryKb()
 static const char* kIsoPaths[] = { "/FNAF1.iso", "FNAF1/FNAF1.iso", "FNAF1.iso" };
 static std::string sIsoPath;
 static std::unordered_map<std::string, uint32_t> sIsoOffsets;
+static std::unordered_map<std::string, uint32_t> sIsoSizes;
 static bool sIsoScanned = false;
 
 static uint32_t ReadBe32(const uint8_t* p)
@@ -267,6 +268,7 @@ static void ScanIsoLocked()
             else
             {
                 sIsoOffsets[name] = ReadBe32(entry + 4);
+                sIsoSizes[name] = ReadBe32(entry + 8);
             }
         }
 
@@ -303,6 +305,60 @@ static bool FindIsoFile(const std::string& relPath, uint32_t& offset)
     }
 
     offset = it->second;
+    return true;
+}
+
+// Animation frames (jumpscares, Foxy's run) through their own handle on FNAF1.iso. Through the
+// engine's shared handle every frame paid a backwards seek (libfat walks the cluster chain from
+// the start), 50-100 ms per frame on hardware. A frame's files sit one after another in the ISO,
+// so this handle mostly reads straight on without seeking.
+static FILE* sAnimFile = nullptr;
+static uint32_t sAnimFilePos = UINT32_MAX;
+
+bool ReadAnimationFrame(const std::string& relPath, std::vector<uint8_t>& out)
+{
+    uint32_t base = 0;
+    if (!FindIsoFile(relPath, base))
+    {
+        return ReadDataFile(relPath, out);      // disc boots (Dolphin) and loose files
+    }
+
+    std::string key;
+    for (char c : std::string(kDataRoot) + relPath)
+    {
+        key += (char)tolower((unsigned char)c);
+    }
+    const uint32_t size = sIsoSizes[key];
+    if (size == 0)
+    {
+        return ReadDataFile(relPath, out);
+    }
+
+    out.resize(size);
+    OctLockFileIo();
+    if (sAnimFile == nullptr)
+    {
+        sAnimFile = fopen(sIsoPath.c_str(), "rb");
+        sAnimFilePos = UINT32_MAX;
+    }
+    // Files are padded to 4 bytes in the ISO, so the next frame usually starts a few bytes on:
+    // read through that gap rather than seek.
+    bool ok = sAnimFile != nullptr;
+    if (ok && sAnimFilePos != base)
+    {
+        char gap[64];
+        const bool shortGap = sAnimFilePos < base && base - sAnimFilePos <= sizeof(gap);
+        ok = shortGap ? fread(gap, 1, base - sAnimFilePos, sAnimFile) == base - sAnimFilePos
+                      : fseek(sAnimFile, long(base), SEEK_SET) == 0;
+    }
+    ok = ok && fread(out.data(), 1, size, sAnimFile) == size;
+    sAnimFilePos = ok ? base + size : UINT32_MAX;
+    OctUnlockFileIo();
+
+    if (!ok)
+    {
+        return ReadDataFile(relPath, out);
+    }
     return true;
 }
 

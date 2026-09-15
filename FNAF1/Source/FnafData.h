@@ -14,6 +14,10 @@ class SoundWave;
 // Game data lives in loose files under sd:/FNAF1/Data (built by tools/build_data.py).
 bool ReadDataFile(const std::string& relPath, std::vector<uint8_t>& out);
 
+// Jumpscare and Foxy run frames: read through their own handle on FNAF1.iso (SD boots), so
+// consecutive frames read straight on instead of seeking. Falls back to ReadDataFile.
+bool ReadAnimationFrame(const std::string& relPath, std::vector<uint8_t>& out);
+
 // A YUV texture that shows one background at a time. Backgrounds stay in RAM as
 // JPEG bytes and are decoded straight into the texture's planes when shown.
 class YuvCanvas
