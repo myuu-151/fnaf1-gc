@@ -20,12 +20,13 @@ A private, personal port of Five Nights at Freddy's (all credit to Scott Cawthon
 
 Requirements:
 - devkitPro with devkitPPC
-- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built and `Octave.exe` rebuilt. Use commit `33913c1` or later:
+- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built and `Octave.exe` rebuilt. Use commit `ad32746` or later:
   - `73155d6` makes the SD Gecko driver write at 13.5 MHz; before it, writes at 27 MHz corrupted files on passive SD adapters.
   - `99db4e5` makes the packager build a project's own `Source/` + `Makefile_GCN` (without it, it compiles Octave's Standalone game), and locks the engine's whole-file disc reads (without it, disc boots such as Dolphin can crash, see `issues/04`).
   - `15172d0` adds `OctLockFileIo()` / `OctUnlockFileIo()` (the game's reader thread holds the engine's file I/O lock around every SD read; without them the game doesn't link), fixes a lost wakeup in the SD driver's `__exi_wait` that hung a second thread using the card, and raises `AUD_MAX_PCM_STREAMS` from 4 to 8 (a night streams up to 7 sounds at once).
   - `b9b189a` gives each PCM stream one fixed queue buffer. The old growing `std::vector` eventually failed to allocate with several streams playing, and the resulting `abort()` froze the game with no crash screen. It also holds the engine's file I/O lock while writing its SD log lines.
   - `33913c1` keeps each stream slot's buffers across close and open. Allocating and freeing them for every stream (the camera tape sound starts each time the tablet comes up) fragmented the heap until streams failed to open.
+  - `ad32746` caps a stream's played count at the audio actually handed to the mixer (it ran ahead during slow camera switches, so the game queued more than was playing until audio was dropped), restores the 2 s queue, and logs stream memory problems to the SD log.
 - Python 3 with Pillow
 - ffmpeg (the script uses Octave's `External/ffmpeg/bin/ffmpeg.exe`, or `OCTAVE_FFMPEG`)
 
@@ -70,6 +71,9 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 | Y | Debug: Bonnie's jumpscare |
 | D-pad down | Debug: Chica's jumpscare |
 | D-pad up | Debug: put Bonnie and Chica at the doors |
+| START (during a night) | Debug: complete the night (jump to 6 AM) |
+| C-stick down | Debug: Foxy runs down the West Hall, shown on CAM 2A |
+| C-stick up | Debug: Golden Freddy's event (his poster on CAM 2B; lower the tablet to see him, wait 5 s for the ending, which resets the GameCube) |
 
 ## What the prototype has
 
@@ -90,7 +94,6 @@ Not in it yet:
 - Freddy roaming
 - The original AI tables (the prototype uses its own difficulty), and nights 2–5 with their phone calls
 - The exact odds of the rare camera pictures (placeholder: 1 in 20 per picture)
-- Golden Freddy in the office (only his rare poster is in)
 
 ## Data formats (`FNAF1/Scripts/Data`)
 

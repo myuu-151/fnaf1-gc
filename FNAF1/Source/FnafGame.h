@@ -51,6 +51,7 @@ private:
         Jumpscare,
         GameOver,
         Win,
+        CreepyEnd,      // Golden Freddy got you: his face and scream for 1 s, then the GameCube resets
     };
 
     struct Animatronic
@@ -121,9 +122,13 @@ private:
     void UpdateFoxy(float deltaTime);
     void FoxyArrive();
     void LowerTablet();
+    void RaiseTablet();
     void StartPowerOut();
     void UpdatePowerOut(float deltaTime);
     void StartJumpscare(const std::string& who);
+    void UpdateGoldenFreddy(float deltaTime);
+    void StartCreepyEnd();
+    void UpdateCreepyEnd(float deltaTime);
     void SetLight(bool left, bool on);
     void ShowMessage(const std::string& message);
 
@@ -162,6 +167,7 @@ private:
     PcmPlayer mEerie;           // eerie ambience, louder as the animatronics get close
     PcmPlayer mBreath;          // breathing when someone gets into the office
     PcmPlayer mTapeSound;       // MiniDV tape (stereo) while the cameras are open
+    PcmPlayer mRobotVoice;      // under the hallucination flashes (the night's 8th stream)
     float mEerieVolume = 0.0f;
     int32_t mAmbienceLayer = -1;    // how many of Bonnie and Chica are off the stage (eerie ambience level)
     Text* mDebugText = nullptr;     // debug line: ambience level and rooms
@@ -285,4 +291,25 @@ private:
     std::string mJumpWho;
     int32_t mJumpFrame = 0;
     float mJumpTimer = 0.0f;
+
+    // Golden Freddy ("yellow bear" in the original). mYellowBear is its alterable value A:
+    // 0 idle, 1 armed (his poster is on CAM 2B), 2 seen (he sits in the office once the cameras go down).
+    int32_t mYellowBear = 0;
+    float mYellowBearShownTime = 0.0f;  // its value B: frames he's been in the office (300 = 5 s ends the game)
+    bool mYellowBearShown = false;
+    bool mYellowBearWasShown = false;   // for the original's "only once" on showing him
+    float mYellowBearRollTimer = 0.0f;  // every 1 s, a 1 in 100000 chance to arm him
+    Quad* mGoldenQuad = nullptr;
+    Sprite mGoldenSprite;
+
+    // The hallucination flashes ("Active 21"): for 100 frames, each frame has a 1 in 10 chance to show.
+    bool mHallucination = false;
+    float mHallucinationTime = 0.0f;
+    float mHallucinationStepTimer = 0.0f;   // the original re-rolls every frame at 60 fps
+    bool mHallucinationVisible = false;
+    float mHallucinationRollTimer = 0.0f;   // every 1 s, a 1 in 1000 chance of a hallucination
+    bool mRobotVoiceOn = false;
+    Quad* mHallucinationQuad = nullptr;
+    std::string mHallucinationShown;
+    float mCreepyEndTimer = 0.0f;
 };

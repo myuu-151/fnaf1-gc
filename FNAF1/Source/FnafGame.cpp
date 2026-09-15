@@ -16,6 +16,10 @@
 #include <cstdio>
 #include <cstdlib>
 
+#if PLATFORM_DOLPHIN
+#include <ogc/system.h>
+#endif
+
 // Layout of the original 1600x720 office, in its own pixels.
 static constexpr float kOfficeWidth = 1600.0f;
 static constexpr float kOfficeHeight = 720.0f;
@@ -44,9 +48,12 @@ static constexpr float kFanFrameSeconds = 1.0f / 30.0f;
 static constexpr uint64_t kLoadBudgetUs = 30000;  // loading work per frame
 
 // Prototype difficulty: a bit above the original Night 1 so things happen.
-static constexpr int32_t kBonnieBaseAi = 3;
-static constexpr int32_t kChicaBaseAi = 3;
-static constexpr int32_t kFoxyBaseAi = 5;      // rolls 1..20 every 5 s; raised from 2 for a livelier night 1
+// Night 1 activity levels, as in the original: everyone starts at 0 (nobody moves) and gains 1 at
+// 2 AM (Bonnie), 3 AM and 4 AM (Bonnie, Chica, Foxy). A move happens when Random(20) + 1 is at or
+// below the level.
+static constexpr int32_t kBonnieBaseAi = 0;
+static constexpr int32_t kChicaBaseAi = 0;
+static constexpr int32_t kFoxyBaseAi = 0;
 
 // Rare camera pictures (the original rolls a "random for pic" counter): Freddy staring on
 // the Show Stage, and rare posters on empty cameras. Rolled when the tablet goes up or the
@@ -113,7 +120,14 @@ static const CameraInfo kCameras[kNumCameras] = {
 static const char* kSoundNames[] = {
     "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "run", "knock", "foxybang", "honk",
     "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3", "pots4", "error",
+    "giggle",
 };
+
+// Golden Freddy in the office: image 573's top-left in the 1600x720 office, and its size.
+static constexpr float kGoldenX = 390.0f;
+static constexpr float kGoldenY = 218.0f;
+static constexpr float kGoldenWidth = 541.0f;
+static constexpr float kGoldenHeight = 521.0f;
 
 // SD diagnostic log (Octave System_Dolphin.cpp; writes /octiso.log when the local logger is enabled).
 void OctLog(const char* format, ...);
@@ -150,6 +164,13 @@ bool FnafGame::Initialize()
     BuildUi();
     BuildMenuUi();
     BuildLoadingUi();
+
+    // The hallucination flashes cover the whole screen, cameras and all. They share the jumpscare
+    // canvas, which nothing else uses during a night.
+    mHallucinationQuad = mRoot->CreateChild<Quad>("Hallucination");
+    mHallucinationQuad->SetTexture(mJumpCanvas.GetTexture());
+    mHallucinationQuad->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
+    mHallucinationQuad->SetVisible(false);
 
     // The jumpscare is created last so it draws in front of everything (child order is draw order).
     mJump = mRoot->CreateChild<Quad>("Jumpscare");
@@ -195,7 +216,9 @@ void FnafGame::QueueLoadJobs()
     // frames, which animate all the time, are kept in RAM.
     // So are CAM 2A's three pictures, which the hall light's flicker swaps several times a second.
     for (const char* office : { "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark", "office_freddy_dark",
-                                "cam2a_dark", "cam2a_empty", "cam2a_bonnie" })
+                                "cam2a_dark", "cam2a_empty", "cam2a_bonnie",
+                                // the hallucination flashes swap pictures many times a second
+                                "hallucination_0", "hallucination_1", "hallucination_2", "hallucination_3" })
     {
         queueImage(office);
     }
@@ -373,6 +396,10 @@ void FnafGame::BuildUi()
         mDoors[side].mButton = mRoot->CreateChild<Quad>(side == 0 ? "ButtonLeft" : "ButtonRight");
     }
 
+    // Golden Freddy sits in the office, in front of the desk and under the tablet.
+    mGoldenQuad = mRoot->CreateChild<Quad>("GoldenFreddy");
+    mGoldenQuad->SetVisible(false);
+
     mFlip = mRoot->CreateChild<Quad>("TabletFlip");
     mFlip->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
 
@@ -507,6 +534,21 @@ void FnafGame::StartNight()
     mCameraCutTimer = 0.0f;
     mCheerTimer = 0.0f;
     mLaughed = false;
+
+    mYellowBear = 0;
+    mYellowBearShownTime = 0.0f;
+    mYellowBearShown = false;
+    mYellowBearWasShown = false;
+    mYellowBearRollTimer = 0.0f;
+    mHallucination = false;
+    mHallucinationTime = 0.0f;
+    mHallucinationStepTimer = 0.0f;
+    mHallucinationVisible = false;
+    mHallucinationRollTimer = 0.0f;
+    mRobotVoiceOn = false;
+    mHallucinationShown.clear();
+    mHallucinationQuad->SetVisible(false);
+    mGoldenQuad->SetVisible(false);
 }
 
 void FnafGame::Update(float deltaTime)
@@ -542,6 +584,7 @@ void FnafGame::Update(float deltaTime)
     mEerie.Update();
     mBreath.Update();
     mTapeSound.Update();
+    mRobotVoice.Update();
     const uint64_t streamUs = SYS_GetTimeMicroseconds() - streamStart;
 
     // Timing summary every 5 s: average and worst frame, and time spent reading streams.
@@ -571,7 +614,7 @@ void FnafGame::Update(float deltaTime)
     deltaTime = glm::min(deltaTime, 0.1f);
 
     // Crash breadcrumb: every state change goes to the log.
-    static const char* kStateNames[] = { "Loading", "Menu", "Newspaper", "NightIntro", "Playing", "PowerOut", "Jumpscare", "GameOver", "Win" };
+    static const char* kStateNames[] = { "Loading", "Menu", "Newspaper", "NightIntro", "Playing", "PowerOut", "Jumpscare", "GameOver", "Win", "CreepyEnd" };
     static int32_t sLoggedState = -1;
     if ((int32_t)mState != sLoggedState)
     {
@@ -592,6 +635,10 @@ void FnafGame::Update(float deltaTime)
 
     case State::GameOver:
         UpdateGameOver(deltaTime);
+        break;
+
+    case State::CreepyEnd:
+        UpdateCreepyEnd(deltaTime);
         break;
 
     case State::Win:
@@ -644,6 +691,12 @@ void FnafGame::UpdatePlaying(float deltaTime)
         }
     }
 
+    UpdateGoldenFreddy(deltaTime);
+    if (mState == State::CreepyEnd)
+    {
+        return;
+    }
+
     if (mState == State::PowerOut)
     {
         UpdatePowerOut(deltaTime);
@@ -651,7 +704,49 @@ void FnafGame::UpdatePlaying(float deltaTime)
     }
 
     // Debug keys: X = power out, Y = Bonnie's jumpscare, D-pad down = Chica's,
-    // D-pad up = Bonnie and Chica at the doors.
+    // D-pad up = Bonnie and Chica at the doors, START = complete the night.
+    if (Pressed(GAMEPAD_START))
+    {
+        // Jump the clock to 6 AM: the hour check above wins the night on the next frame.
+        mNightTime = kFirstHourSeconds + 5.0f * kHourSeconds;
+        OctLog("FNAF1: debug: night complete");
+    }
+
+    // C-stick down = Foxy runs down the West Hall, shown on CAM 2A (cameras raised if needed), to
+    // check the run animation. He reaches the left door when it ends, as usual.
+    static bool sCStickDownHeld = false;
+    const bool cStickDown = INP_GetGamepadAxisValue(GAMEPAD_AXIS_RTHUMB_Y, 0) < -0.6f;
+    if (cStickDown && !sCStickDownHeld)
+    {
+        RaiseTablet();
+        mCameraIndex = (int32_t)Room::WestHall;
+        mCameraFresh = true;
+        mFoxyStage = 3;
+        mFoxyAtDoor = false;
+        mFoxyRunning = true;
+        mFoxyRunTimer = 0.0f;
+        mFoxyRunFrame = 0;
+        mFoxyRunFrameTimer = 0.0f;
+        PlaySound("run");
+        OctLog("FNAF1: debug: foxy runs");
+    }
+    sCStickDownHeld = cStickDown;
+
+    // C-stick up = Golden Freddy: arm his event and open the cameras on CAM 2B, where his poster
+    // shows (unless Bonnie is there). Lower the tablet to see him in the office; leave it down for
+    // 5 s for the creepy end (which resets the GameCube), or raise it to make him go away.
+    static bool sCStickUpHeld = false;
+    const bool cStickUp = INP_GetGamepadAxisValue(GAMEPAD_AXIS_RTHUMB_Y, 0) > 0.6f;
+    if (cStickUp && !sCStickUpHeld)
+    {
+        mYellowBear = 1;
+        RaiseTablet();
+        mCameraIndex = (int32_t)Room::WestCorner;
+        mCameraFresh = true;
+        mStaticTimer = kStaticSeconds;
+        OctLog("FNAF1: debug: golden freddy armed");
+    }
+    sCStickUpHeld = cStickUp;
     if (Pressed(GAMEPAD_UP))
     {
         for (Animatronic* a : { &mBonnie, &mChica })
@@ -988,25 +1083,13 @@ void FnafGame::UpdateInput(float deltaTime)
     // The tablet can't come up while Foxy is at the door (the original's progress 5).
     if (Pressed(GAMEPAD_A) && !(mFoxyAtDoor && !mTabletUp))
     {
-        mTabletUp = !mTabletUp;
-        mTabletUpTime = 0.0f;
         if (mTabletUp)
         {
-            PlaySound("camup");
-            // Cameras open: the original plays the MiniDV tape sound (stereo, full volume) on
-            // its own channel and turns the fan's channel down (to 10, from 25).
-            mTapeSound.Start("snd/minidv.pcm", (uint32_t)mCounts["size_minidv"], false, 1.0f);
-            mFanSound.SetVolume(0.24f);
-            mCall.SetVolume(1.0f);          // the call's channel goes from 100 to 50 with the cameras up
-            SetLight(true, false);
-            SetLight(false, false);
-            mStaticTimer = kStaticSeconds;
-            mCameraFresh = true;
+            LowerTablet();
         }
         else
         {
-            mTabletUp = true;   // LowerTablet() expects it up
-            LowerTablet();
+            RaiseTablet();
         }
     }
 
@@ -1064,6 +1147,27 @@ void FnafGame::UpdateInput(float deltaTime)
             SetLight(side == 0, !door.mLight);
         }
     }
+}
+
+void FnafGame::RaiseTablet()
+{
+    if (mTabletUp)
+    {
+        return;
+    }
+
+    mTabletUp = true;
+    mTabletUpTime = 0.0f;
+    PlaySound("camup");
+    // Cameras open: the original plays the MiniDV tape sound (stereo, full volume) on its own
+    // channel and turns the fan's channel down (to 10, from 25).
+    mTapeSound.Start("snd/minidv.pcm", (uint32_t)mCounts["size_minidv"], false, 1.0f);
+    mFanSound.SetVolume(0.24f);
+    mCall.SetVolume(1.0f);          // the call's channel goes from 100 to 50 with the cameras up
+    SetLight(true, false);
+    SetLight(false, false);
+    mStaticTimer = kStaticSeconds;
+    mCameraFresh = true;
 }
 
 void FnafGame::LowerTablet()
@@ -1158,11 +1262,16 @@ void FnafGame::UpdateAnimatronics(float deltaTime)
             continue;
         }
 
+        // Window scare (the original's #332/#333): once per visit to the doorway, the first time the
+        // office picture actually shows her lit there (light on, cameras down, not a light dropout
+        // step). It plays on channel 9 at volume 100, the mixer's maximum here.
         const Room door = a->mLeftSide ? Room::LeftDoor : Room::RightDoor;
-        if (a->mRoom == door && mDoors[side].mLight && !a->mSeenAtDoor)
+        const bool litInDoorway = a->mRoom == door && mDoors[side].mLight && !mLightDropout &&
+                                  !mTabletUp && mTabletProgress <= 0.0f;
+        if (litInDoorway && !a->mSeenAtDoor)
         {
             a->mSeenAtDoor = true;
-            PlaySound("windowscare");
+            PlaySound("windowscare", false, 2.0f);
         }
 
         a->mMoveTimer += deltaTime;
@@ -1327,9 +1436,10 @@ void FnafGame::UpdateFoxy(float deltaTime)
     {
         // The run plays out on CAM 2A; he reaches the door when it ends.
         mFoxyRunFrameTimer += deltaTime;
-        while (mFoxyRunFrameTimer >= kFoxyRunFrameSeconds)
+        // One picture per update at most (no skipping), as with the jumpscares.
+        if (mFoxyRunFrameTimer >= kFoxyRunFrameSeconds)
         {
-            mFoxyRunFrameTimer -= kFoxyRunFrameSeconds;
+            mFoxyRunFrameTimer = glm::min(mFoxyRunFrameTimer - kFoxyRunFrameSeconds, kFoxyRunFrameSeconds);
             mFoxyRunFrame++;
         }
         mFoxyRunTimer += deltaTime;
@@ -1440,6 +1550,11 @@ void FnafGame::StartJumpscare(const std::string& who)
     mTabletUp = false;
     mTabletProgress = 0.0f;
     mOfficePan = 0.5f;      // face the middle of the office, where the lunge happens
+
+    // The original's jumpscare animations hide Golden Freddy (#426, #427).
+    mYellowBearShown = false;
+    mHallucinationVisible = false;
+    mRobotVoiceOn = false;
     mJumpWho = who;
     OctLog("FNAF1: jumpscare %s", who.c_str());
     mJumpFrame = 0;
@@ -1470,11 +1585,10 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     const float frameSeconds = 1.0f / fps;
     if (mJumpTimer >= frameSeconds && mJumpFrame + 1 < frames)
     {
-        // Advance by the time that passed, skipping frames when loading one took longer than a
-        // frame (reading and decoding a frame on the GameCube can), so the scare keeps its length.
-        const int32_t steps = (int32_t)(mJumpTimer / frameSeconds);
-        mJumpTimer -= steps * frameSeconds;
-        mJumpFrame = glm::min(mJumpFrame + steps, frames - 1);
+        // At most one picture per update, like the original's animations (one step per game tick):
+        // a slow frame load delays the next picture instead of skipping one, so every frame shows.
+        mJumpTimer = glm::min(mJumpTimer - frameSeconds, frameSeconds);
+        mJumpFrame++;
         char name[64];
         snprintf(name, sizeof(name), "jump_%s_%02d", mJumpWho.c_str(), mJumpFrame);
         std::string shown;
@@ -1495,6 +1609,165 @@ void FnafGame::UpdateJumpscare(float deltaTime)
         mMenuStaticQuad->SetVisible(true);
         mJingle.Start("snd/deadstatic.pcm", (uint32_t)mCounts["size_deadstatic"], false, 1.0f);
     }
+}
+
+void FnafGame::UpdateGoldenFreddy(float deltaTime)
+{
+    // Golden Freddy, from the original's events (numbers are its event lines). Its "viewing" is 0
+    // from the moment the tablet starts down until a camera shows again.
+    const bool viewing = mState == State::Playing && mTabletUp && mTabletProgress >= 1.0f;
+
+    // #5: a camera showing hides him.
+    if (viewing)
+    {
+        mYellowBearShown = false;
+    }
+
+    // #42, #43: while armed, CAM 2B shows his poster (see GetCameraImage). Seeing it (Bonnie not
+    // there) plays the giggle once and puts him in the office. The giggle's channel 27 is at 100.
+    if (viewing && (Room)mCameraIndex == Room::WestCorner && !IsAt(mBonnie, Room::WestCorner) && mYellowBear == 1)
+    {
+        mYellowBear = 2;
+        PlaySound("giggle", false, 2.0f);
+        // His office picture (425 KB) is only read from the disc once he's needed.
+        if (mGoldenSprite.Get() == nullptr && !LoadSprite("spr/golden_office.rgx", mGoldenSprite))
+        {
+            OctLog("FNAF1: failed to load golden_office");
+        }
+        OctLog("FNAF1: golden freddy poster seen");
+    }
+
+    // #412-#418: the hallucination. Each frame (at 60 fps) rolls Random(10); for 100 frames after it
+    // starts, a roll of 1 shows a flash and turns the robot voice's channel 21 up to 100.
+    if (mHallucination)
+    {
+        mHallucinationTime += deltaTime;
+        if (mHallucinationTime >= 100.0f / 60.0f)
+        {
+            mHallucination = false;
+            mHallucinationTime = 0.0f;
+        }
+    }
+    mHallucinationStepTimer += deltaTime;
+    if (mHallucinationStepTimer >= 1.0f / 60.0f)
+    {
+        mHallucinationStepTimer = fmod(mHallucinationStepTimer, 1.0f / 60.0f);
+        const bool rolledOne = (rand() % 10) == 1;
+        mHallucinationVisible = mHallucination && rolledOne;
+        if (mHallucinationVisible && !mRobotVoiceOn)
+        {
+            mRobotVoice.Start("snd/robotvoice.pcm", (uint32_t)mCounts["size_robotvoice"], true, 2.0f);
+            mRobotVoiceOn = true;
+        }
+    }
+    else if (!mHallucination)
+    {
+        mHallucinationVisible = false;
+    }
+
+    // #380: the voice goes quiet once the hallucination is over, unless Bonnie is on CAM 2B or Chica
+    // on CAM 4B (from night 4 those glitch the voice too).
+    if (mRobotVoiceOn && !mHallucination && !IsAt(mBonnie, Room::WestCorner) && !IsAt(mChica, Room::EastCorner))
+    {
+        mRobotVoice.Stop();
+        mRobotVoiceOn = false;
+    }
+
+    // #418: every second, a 1 in 1000 chance of a hallucination, any night.
+    mHallucinationRollTimer += deltaTime;
+    if (mHallucinationRollTimer >= 1.0f)
+    {
+        mHallucinationRollTimer -= 1.0f;
+        if ((rand() % 1000) == 1)
+        {
+            mHallucination = true;
+            OctLog("FNAF1: hallucination");
+        }
+    }
+
+    // #419: seen on the poster, he's in the office whenever the cameras are down.
+    if (!viewing && mYellowBear == 2)
+    {
+        mYellowBearShown = true;
+    }
+
+    // #420, #421: 300 frames (5 s) in the office with him ends the game.
+    if (mYellowBearShown)
+    {
+        mYellowBearShownTime += deltaTime;
+        if (mYellowBearShownTime >= 300.0f / 60.0f)
+        {
+            StartCreepyEnd();
+            return;
+        }
+    }
+
+    // #422: raising the cameras after he's appeared makes him leave for good.
+    if (mYellowBearShownTime > 0.0f && viewing)
+    {
+        mYellowBear = 0;
+    }
+
+    // #423: showing him starts a hallucination.
+    if (mYellowBearShown && !mYellowBearWasShown)
+    {
+        mHallucination = true;
+        OctLog("FNAF1: golden freddy in the office");
+    }
+    mYellowBearWasShown = mYellowBearShown;
+
+    // #424: every second, a 1 in 100000 chance to arm him.
+    mYellowBearRollTimer += deltaTime;
+    if (mYellowBearRollTimer >= 1.0f)
+    {
+        mYellowBearRollTimer -= 1.0f;
+        if ((rand() % 100000) == 1)
+        {
+            mYellowBear = 1;
+            OctLog("FNAF1: golden freddy armed");
+        }
+    }
+}
+
+void FnafGame::StartCreepyEnd()
+{
+    // The original jumps to its "creepy end" frame: his face full screen, all sounds stopped and
+    // XSCREAM2 on channel 29. After 1 s it closes the game; here the GameCube resets.
+    AudioManager::StopAllSounds();
+    StopStreams();
+    OctLog("FNAF1: golden freddy creepy end");
+
+    mState = State::CreepyEnd;
+    mCreepyEndTimer = 0.0f;
+    mTabletUp = false;
+    mTabletProgress = 0.0f;
+    mYellowBearShown = false;
+    mHallucinationVisible = false;
+    mRobotVoiceOn = false;
+    mJumpWho = "golden";
+
+    std::string shown;
+    ShowImage(mJumpCanvas, "golden_end", shown);
+    mMenuShown.clear();
+    mHallucinationShown.clear();
+    mJump->SetVisible(true);
+    mJingle.Start("snd/xscream2.pcm", (uint32_t)mCounts["size_xscream2"], false, 2.0f);
+}
+
+void FnafGame::UpdateCreepyEnd(float deltaTime)
+{
+    mCreepyEndTimer += deltaTime;
+    if (mCreepyEndTimer < 1.0f)
+    {
+        return;
+    }
+
+#if PLATFORM_DOLPHIN
+    OctLog("FNAF1: resetting");
+    SYS_ResetSystem(SYS_HOTRESET, 0, 0);
+#else
+    EnterMenu();
+#endif
 }
 
 std::string FnafGame::GetOfficeImage() const
@@ -1583,6 +1856,7 @@ std::string FnafGame::GetCameraImage(Room camera) const
     // Rare pictures on empty cameras, by the roll.
     case Room::WestCorner:
         if (bonnie) return "cam2b_bonnie";
+        if (mYellowBear >= 1) return "cam2b_golden";   // his event is armed (or he's already been seen)
         return (pic < 2) ? "cam2b_rare_freddy" : "cam2b_empty";
     case Room::EastHall:
         if (chica) return (mChica.mPose == 1) ? "cam4a_chica" : "cam4a_chica2";
@@ -1683,6 +1957,25 @@ void FnafGame::UpdateView(float deltaTime)
         door.mButton->SetVisible(mState != State::PowerOut);
     }
 
+    const bool night = (mState == State::Playing || mState == State::PowerOut);
+    const bool goldenOn = night && mYellowBearShown && mGoldenSprite.Get() != nullptr;
+    mGoldenQuad->SetVisible(goldenOn);
+    if (goldenOn)
+    {
+        mGoldenQuad->SetTexture(mGoldenSprite.Get());
+        mGoldenQuad->SetRect(kGoldenX * scale - panX, kGoldenY * scale, kGoldenWidth * scale, kGoldenHeight * scale);
+    }
+
+    // Hallucination flashes: the original's animation runs at speed 75 (45 fps) through four pictures.
+    const bool hallucinationOn = night && mHallucinationVisible;
+    mHallucinationQuad->SetVisible(hallucinationOn);
+    if (hallucinationOn)
+    {
+        char name[32];
+        snprintf(name, sizeof(name), "hallucination_%d", (int32_t)(mCameraPanTime * 45.0f) % 4);
+        ShowImage(mJumpCanvas, name, mHallucinationShown);
+    }
+
     // Tablet flip
     const bool flipping = mTabletProgress > 0.0f && mTabletProgress < 1.0f;
     mFlip->SetVisible(flipping && !mFlipFrames.empty());
@@ -1781,7 +2074,7 @@ void FnafGame::UpdateView(float deltaTime)
     // Jumpscare: centered on the current view.
     if (mJump->IsVisible())
     {
-        if (mJumpWho == "freddy")
+        if (mJumpWho == "freddy" || mJumpWho == "golden")
         {
             // The power-out jumpscare frames are screen-sized (1280x720), not office-wide.
             mJump->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
@@ -2046,9 +2339,9 @@ void FnafGame::UpdateHud()
                                         "W.Hall", "Closet", "W.Corner", "E.Hall", "E.Corner", "L.Door", "R.Door", "Office" };
         static const char* kLayers[] = { "dark + eerie 0", "dark + eerie 30", "dark + eerie 50", "dark + eerie 75" };
         char debug[128];
-        snprintf(debug, sizeof(debug), "Ambience %s | Bonnie %s | Chica %s | Foxy %d | skips %u",
+        snprintf(debug, sizeof(debug), "Ambience %s | Bonnie %s | Chica %s | Foxy %d | Gold %d | skips %u",
                  mAmbienceLayer >= 0 ? kLayers[mAmbienceLayer] : "-",
-                 kRooms[(int)mBonnie.mRoom], kRooms[(int)mChica.mRoom], mFoxyStage,
+                 kRooms[(int)mBonnie.mRoom], kRooms[(int)mChica.mRoom], mFoxyStage, mYellowBear,
                  (unsigned)GetStreamUnderruns());
         mDebugText->SetText(debug);
     }
@@ -2089,6 +2382,8 @@ void FnafGame::StopStreams()
     mEerie.Stop();
     mBreath.Stop();
     mTapeSound.Stop();
+    mRobotVoice.Stop();
+    mRobotVoiceOn = false;
 }
 
 void FnafGame::PlaySound(const char* name, bool loop, float volume)

@@ -27,4 +27,6 @@ size_minidv 733354
 size_musicbox 2718310
 size_piratesong 425984
 size_powerdown 825812
+size_robotvoice 661500
+size_xscream2 698888
 static 8

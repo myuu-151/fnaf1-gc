@@ -63,6 +63,11 @@ BACKGROUNDS = {
     "cam4b_rare_news0": 549, "cam4b_rare_news1": 550, "cam4b_rare_news2": 551, "cam4b_rare_news3": 552,
     "cam4a_rare_faces": 546, "cam4a_rare_itsme": 554,
     "cam1c_rare_itsme": 553,
+    # Golden Freddy: his poster on CAM 2B once his event is armed, the hallucination flashes
+    # (the original's "Active 21": Freddy, IT'S ME, Bonnie, IT'S ME) and his face on the "creepy end" frame
+    "cam2b_golden": 540,
+    "hallucination_0": 525, "hallucination_1": 543, "hallucination_2": 520, "hallucination_3": 544,
+    "golden_end": 548,
     # main menu: Freddy's face (431 normal, 440/441 twitches, 442 the endoskeleton glitch)
     "menu_freddy0": 431, "menu_freddy1": 440, "menu_freddy2": 441, "menu_freddy3": 442,
     "newspaper": 539,               # help-wanted ad shown on New Game
@@ -123,6 +128,7 @@ SOUNDS = {
     "pots3": (19, None),
     "pots4": (18, 3.0),          # OVEN-DRA_7 (the original's 5 kitchen actions use it twice); trimmed, it's long
     "error": (4, None),          # error: door/light buttons while someone is in the office
+    "giggle": (38, None),        # Laugh_Giggle_Girl_1: Golden Freddy's poster on CAM 2B
 }
 
 # Long sounds, streamed from the disc at runtime instead of loaded into RAM.
@@ -147,6 +153,8 @@ STREAMS = {
     "chimes": (32, 8.0),         # chimes 2 (6 AM)
     "cheer": (33, None),         # CROWD_SMALL_CHIL (6 AM)
     "laugh": (56, None),         # Laugh_Giggle_Girl_1d (Freddy, power out)
+    "xscream2": (46, None),      # XSCREAM2: Golden Freddy's "creepy end"
+    "robotvoice": (40, None),    # robotvoice: plays under the hallucination flashes
 }
 
 # Streamed sounds kept in stereo (the original files are stereo; everything else is made mono).
@@ -311,6 +319,15 @@ def build_fan():
     return {"fan": len(frames)}
 
 
+def build_golden():
+    # Golden Freddy slumped in the office (image 573): 541x521 at (2, 2) in atlas M0003, drawn
+    # with its top-left at (390, 218) in the 1600x720 office.
+    im = Image.open(os.path.join(SRC, "M0003.png")).convert("RGBA").crop((2, 2, 2 + 541, 2 + 521))
+    size = (round4(541 * BUTTON_SCALE), round4(521 * BUTTON_SCALE))
+    save_rgx(im.resize(size, Image.LANCZOS), "golden_office")
+    print("golden freddy: %dx%d" % size)
+
+
 def build_menu_text():
     for name, (atlas, x, y, w, h) in MENU_TEXT.items():
         im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + w, y + h))
@@ -387,6 +404,7 @@ def main():
     counts.update(build_doors())
     counts.update(build_fan())
     build_buttons()
+    build_golden()
     build_menu_text()
     build_sounds(SOUNDS)
     for name, size in build_sounds(STREAMS).items():
