@@ -56,7 +56,24 @@ BACKGROUNDS = {
     "cam4b_rare_news0": 549, "cam4b_rare_news1": 550, "cam4b_rare_news2": 551, "cam4b_rare_news3": 552,
     "cam4a_rare_faces": 546, "cam4a_rare_itsme": 554,
     "cam1c_rare_itsme": 553,
+    # main menu: Freddy's face (431 normal, 440/441 twitches, 442 the endoskeleton glitch)
+    "menu_freddy0": 431, "menu_freddy1": 440, "menu_freddy2": 441, "menu_freddy3": 442,
+    "newspaper": 539,               # help-wanted ad shown on New Game
 }
+
+# Menu text in the texture atlases: (atlas, x, y, w, h). Stored at their size on a 640x480
+# screen (the menu is 1280x720 in the original).
+MENU_TEXT = {
+    "title": ("M0001", 4, 752, 202, 216),       # Five Nights at Freddy's
+    "newgame": ("M0004", 814, 878, 202, 40),
+    "continue": ("M0004", 813, 838, 204, 44),
+    "arrows": ("M0004", 944, 914, 54, 35),      # >>
+    "clock": ("M0005", 7, 720, 224, 37),        # 12:00 AM
+    "first": ("M0005", 471, 792, 72, 31),       # 1st
+    "night": ("M0005", 572, 780, 125, 42),      # Night
+    "copyright": ("M0002", 794, 993, 224, 21),  # (c)2014 Scott Cawthon
+}
+MENU_SCALE = (640 / 1280.0, 480 / 720.0)
 
 JUMPSCARES = {
     "bonnie": [291] + list(range(293, 302)) + [303],
@@ -99,6 +116,8 @@ STREAMS = {
     "call": (41, None),          # voiceover1c: the night 1 phone call
     "ambience": (28, None),      # ambience2
     "musicbox": (30, None),      # music box (power out)
+    "menumusic": (35, None),     # darkness music (main menu)
+    "menustatic": (34, None),    # static2 (main menu)
     "piratesong": (21, None),    # pirate song2: Foxy humming in Pirate Cove
     "circus": (29, None),        # circus: faint carnival tune, rare, any time of the night
     "fan": (2, None),            # Buzz_Fan_Florescent2 (loops all night)
@@ -260,6 +279,14 @@ def build_fan():
     return {"fan": len(frames)}
 
 
+def build_menu_text():
+    for name, (atlas, x, y, w, h) in MENU_TEXT.items():
+        im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + w, y + h))
+        size = (round4(w * MENU_SCALE[0]), round4(h * MENU_SCALE[1]))
+        save_rgx(im.resize(size, Image.LANCZOS), "menu_" + name)
+    print("menu text: %d sprites" % len(MENU_TEXT))
+
+
 def build_sounds(table):
     sizes = {}
     for name, (number, max_seconds) in table.items():
@@ -302,6 +329,7 @@ def main():
     counts.update(build_doors())
     counts.update(build_fan())
     build_buttons()
+    build_menu_text()
     build_sounds(SOUNDS)
     for name, size in build_sounds(STREAMS).items():
         counts["size_" + name] = size

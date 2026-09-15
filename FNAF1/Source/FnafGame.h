@@ -43,6 +43,9 @@ private:
     enum class State : uint8_t
     {
         Loading,
+        Menu,
+        Newspaper,
+        NightIntro,
         Playing,
         PowerOut,
         Jumpscare,
@@ -95,6 +98,13 @@ private:
     void BuildLoadingUi();
     void StartNight();
 
+    void BuildMenuUi();
+    void EnterMenu();
+    void UpdateMenu(float deltaTime);
+    void StartNightIntro();
+    void ShowMenuWidgets(bool menu, bool newspaper, bool intro);
+    void PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y);
+
     void UpdatePlaying(float deltaTime);
     void UpdateInput(float deltaTime);
     void UpdateAnimatronics(float deltaTime);
@@ -140,6 +150,8 @@ private:
     PcmPlayer mFanSound;
     PcmPlayer mJingle;          // 6 AM chimes, or Freddy's laugh during the power-out
     PcmPlayer mCheer;
+    PcmPlayer mMenuMusic;
+    PcmPlayer mMenuHum;
     // The engine runs at most 4 streams: the night has call, ambience, fan and rare music;
     // StopStreams() clears them before the power-out (music box, laugh) and 6 AM (chimes, cheer).
 
@@ -174,6 +186,31 @@ private:
     Quad* mLoadBarBack = nullptr;
     Quad* mLoadBar = nullptr;
     Text* mLoadText = nullptr;
+
+    // Main menu, the new-game newspaper and the "12:00 AM / 1st Night" intro
+    Quad* mMenuBlack = nullptr;
+    Quad* mMenuBack = nullptr;          // Freddy's face, or the newspaper
+    Quad* mMenuStaticQuad = nullptr;
+    Quad* mMenuTitle = nullptr;
+    Quad* mMenuNewGame = nullptr;
+    Quad* mMenuContinue = nullptr;
+    Quad* mMenuArrows = nullptr;
+    Quad* mMenuCopyright = nullptr;
+    Quad* mIntroClock = nullptr;
+    Quad* mIntroFirst = nullptr;
+    Quad* mIntroNight = nullptr;
+    Sprite mMenuTitleSprite;
+    Sprite mMenuNewGameSprite;
+    Sprite mMenuContinueSprite;
+    Sprite mMenuArrowsSprite;
+    Sprite mMenuCopyrightSprite;
+    Sprite mIntroClockSprite;
+    Sprite mIntroFirstSprite;
+    Sprite mIntroNightSprite;
+    std::string mMenuShown;
+    int32_t mMenuSelection = 0;         // 0 = New Game, 1 = Continue
+    float mMenuTimer = 0.0f;
+    float mMenuFrameTimer = 0.0f;
     float mScreenWidth = 640.0f;
     float mScreenHeight = 480.0f;
 

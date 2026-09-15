@@ -51,6 +51,11 @@ static constexpr int32_t kFoxyBaseAi = 2;
 // decoded yet.
 static constexpr int32_t kRarePicOdds = 20;
 
+// Main menu timing
+static constexpr float kMenuFrameSeconds = 0.08f;   // Freddy's face frame and flicker
+static constexpr float kNewspaperSeconds = 5.0f;    // help-wanted ad after New Game
+static constexpr float kNightIntroSeconds = 2.5f;   // "12:00 AM / 1st Night"
+
 // Foxy
 static constexpr float kFoxyMoveInterval = 5.01f;
 static constexpr float kFoxyArriveSeconds = 25.0f;     // after leaving the cove, if nobody watches the hall
@@ -115,6 +120,7 @@ bool FnafGame::Initialize()
 
     QueueLoadJobs();
     BuildUi();
+    BuildMenuUi();
     BuildLoadingUi();
 
     mState = State::Loading;
@@ -158,6 +164,21 @@ void FnafGame::QueueLoadJobs()
     {
         queueImage(office);
     }
+
+    // Main menu: Freddy's face frames (swapped every few frames, so kept in RAM) and the text.
+    for (int32_t i = 0; i < 4; ++i)
+    {
+        snprintf(name, sizeof(name), "menu_freddy%d", i);
+        queueImage(name);
+    }
+    queueSprite("spr/menu_title.rgx", &mMenuTitleSprite);
+    queueSprite("spr/menu_newgame.rgx", &mMenuNewGameSprite);
+    queueSprite("spr/menu_continue.rgx", &mMenuContinueSprite);
+    queueSprite("spr/menu_arrows.rgx", &mMenuArrowsSprite);
+    queueSprite("spr/menu_copyright.rgx", &mMenuCopyrightSprite);
+    queueSprite("spr/menu_clock.rgx", &mIntroClockSprite);
+    queueSprite("spr/menu_first.rgx", &mIntroFirstSprite);
+    queueSprite("spr/menu_night.rgx", &mIntroNightSprite);
 
     for (int32_t i = 0; i < mCounts["static"]; ++i)
     {
@@ -285,8 +306,7 @@ void FnafGame::UpdateLoading()
         widget->SetVisible(false);
     }
 
-    StartNight();
-    OctLog("FNAF1: night started");
+    EnterMenu();
 }
 
 void FnafGame::BuildUi()
@@ -376,6 +396,8 @@ void FnafGame::StartNight()
 {
     AudioManager::StopAllSounds();
     StopStreams();
+    ShowMenuWidgets(false, false, false);
+    OctLog("FNAF1: night started");
 
     mState = State::Playing;
     mNightTime = 0.0f;
@@ -462,6 +484,8 @@ void FnafGame::Update(float deltaTime)
     mFanSound.Update();
     mJingle.Update();
     mCheer.Update();
+    mMenuMusic.Update();
+    mMenuHum.Update();
     const uint64_t streamUs = SYS_GetTimeMicroseconds() - streamStart;
 
     // Timing summary every 5 s: average and worst frame, and time spent reading streams.
@@ -513,8 +537,14 @@ void FnafGame::Update(float deltaTime)
         }
         if (Pressed(GAMEPAD_START) || Pressed(GAMEPAD_A))
         {
-            StartNight();
+            EnterMenu();
         }
+        break;
+
+    case State::Menu:
+    case State::Newspaper:
+    case State::NightIntro:
+        UpdateMenu(deltaTime);
         break;
 
     case State::Loading:
@@ -1256,6 +1286,193 @@ void FnafGame::UpdateView(float deltaTime)
     }
 }
 
+// ---- Main menu --------------------------------------------------------------
+// Positions are in the original 1280x720 screen's pixels.
+
+void FnafGame::BuildMenuUi()
+{
+    // Above the night's widgets, below the loading screen (child order is draw order).
+    mMenuBlack = mRoot->CreateChild<Quad>("MenuBlack");
+    mMenuBlack->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
+    mMenuBlack->SetColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+    mMenuBack = mRoot->CreateChild<Quad>("MenuBack");
+    mMenuBack->SetTexture(mJumpCanvas.GetTexture());
+    mMenuBack->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
+
+    mMenuStaticQuad = mRoot->CreateChild<Quad>("MenuStatic");
+    mMenuStaticQuad->SetTexture(mStaticCanvas.GetTexture());
+    mMenuStaticQuad->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
+
+    mMenuTitle = mRoot->CreateChild<Quad>("MenuTitle");
+    mMenuNewGame = mRoot->CreateChild<Quad>("MenuNewGame");
+    mMenuContinue = mRoot->CreateChild<Quad>("MenuContinue");
+    mMenuArrows = mRoot->CreateChild<Quad>("MenuArrows");
+    mMenuCopyright = mRoot->CreateChild<Quad>("MenuCopyright");
+    mIntroClock = mRoot->CreateChild<Quad>("IntroClock");
+    mIntroFirst = mRoot->CreateChild<Quad>("IntroFirst");
+    mIntroNight = mRoot->CreateChild<Quad>("IntroNight");
+
+    ShowMenuWidgets(false, false, false);
+}
+
+void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
+{
+    if (mMenuBlack == nullptr)
+    {
+        return;
+    }
+
+    mMenuBlack->SetVisible(menu || newspaper || intro);
+    mMenuBack->SetVisible(menu || newspaper);
+    mMenuStaticQuad->SetVisible(menu || intro);
+
+    for (Quad* quad : { mMenuTitle, mMenuNewGame, mMenuContinue, mMenuArrows, mMenuCopyright })
+    {
+        quad->SetVisible(menu);
+    }
+    for (Quad* quad : { mIntroClock, mIntroFirst, mIntroNight })
+    {
+        quad->SetVisible(intro);
+    }
+}
+
+void FnafGame::PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y)
+{
+    // Menu sprites are stored at their size on a 640x480 screen.
+    quad->SetTexture(sprite.Get());
+    quad->SetRect(x * mScreenWidth / 1280.0f, y * mScreenHeight / 720.0f,
+                  sprite.mWidth * mScreenWidth / 640.0f, sprite.mHeight * mScreenHeight / 480.0f);
+}
+
+void FnafGame::EnterMenu()
+{
+    AudioManager::StopAllSounds();
+    StopStreams();
+
+    mState = State::Menu;
+    mMenuSelection = 0;
+    mMenuTimer = 0.0f;
+    mMenuFrameTimer = 0.0f;
+    mMenuShown.clear();     // the jumpscare canvas may hold something else now
+    mJump->SetVisible(false);
+    ShowMessage("");
+
+    PlaceSprite(mMenuTitle, mMenuTitleSprite, 175.0f, 80.0f);
+    PlaceSprite(mMenuNewGame, mMenuNewGameSprite, 175.0f, 400.0f);
+    PlaceSprite(mMenuContinue, mMenuContinueSprite, 175.0f, 470.0f);
+    PlaceSprite(mMenuCopyright, mMenuCopyrightSprite, 1260.0f - mMenuCopyrightSprite.mWidth * 2.0f, 690.0f);
+    ShowMenuWidgets(true, false, false);
+
+    mMenuMusic.Start("snd/menumusic.pcm", (uint32_t)mCounts["size_menumusic"], true, 0.8f);
+    mMenuHum.Start("snd/menustatic.pcm", (uint32_t)mCounts["size_menustatic"], true, 0.4f);
+    OctLog("FNAF1: main menu");
+}
+
+void FnafGame::StartNightIntro()
+{
+    StopStreams();
+    mState = State::NightIntro;
+    mMenuTimer = 0.0f;
+
+    // "12:00 AM" centered, "1st Night" centered below it with the words' bottoms lined up.
+    const float firstWidth = mIntroFirstSprite.mWidth * 2.0f;
+    const float nightWidth = mIntroNightSprite.mWidth * 2.0f;
+    const float gap = 20.0f;
+    const float x = 640.0f - (firstWidth + gap + nightWidth) * 0.5f;
+    const float bottom = 400.0f;
+
+    PlaceSprite(mIntroClock, mIntroClockSprite, 640.0f - mIntroClockSprite.mWidth, 290.0f);
+    PlaceSprite(mIntroFirst, mIntroFirstSprite, x, bottom - mIntroFirstSprite.mHeight * 1.5f);
+    PlaceSprite(mIntroNight, mIntroNightSprite, x + firstWidth + gap, bottom - mIntroNightSprite.mHeight * 1.5f);
+    ShowMenuWidgets(false, false, true);
+    PlaySound("blip");
+}
+
+void FnafGame::UpdateMenu(float deltaTime)
+{
+    mMenuTimer += deltaTime;
+
+    // Static over the menu and the night intro, animated like the cameras'.
+    mStaticFrameTimer -= deltaTime;
+    if (mStaticFrameTimer <= 0.0f)
+    {
+        mStaticFrameTimer = 0.05f;
+        mStaticFrame = (mStaticFrame + 1) % glm::max(1, mCounts["static"]);
+        char name[32];
+        snprintf(name, sizeof(name), "static_%02d", mStaticFrame);
+        std::string unused;
+        ShowImage(mStaticCanvas, name, unused);
+    }
+
+    switch (mState)
+    {
+    case State::Menu:
+    {
+        // Freddy's face flickers, and now and then twitches or glitches.
+        mMenuFrameTimer -= deltaTime;
+        if (mMenuFrameTimer <= 0.0f)
+        {
+            mMenuFrameTimer = kMenuFrameSeconds;
+            const int32_t roll = rand() % 100;
+            const int32_t frame = (roll < 94) ? 0 : (roll < 97) ? 1 : (roll < 99) ? 2 : 3;
+            char name[32];
+            snprintf(name, sizeof(name), "menu_freddy%d", frame);
+            ShowImage(mJumpCanvas, name, mMenuShown);
+            mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 0.55f + (rand() % 46) / 100.0f));
+            mMenuStaticQuad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 0.15f + (rand() % 20) / 100.0f));
+        }
+
+        if (Pressed(GAMEPAD_UP) || Pressed(GAMEPAD_DOWN))
+        {
+            mMenuSelection = 1 - mMenuSelection;
+            PlaySound("blip");
+        }
+        PlaceSprite(mMenuArrows, mMenuArrowsSprite, 95.0f, mMenuSelection == 0 ? 402.0f : 474.0f);
+
+        if (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))
+        {
+            if (mMenuSelection == 0)
+            {
+                // New Game: the help-wanted ad first.
+                StopStreams();
+                mState = State::Newspaper;
+                mMenuTimer = 0.0f;
+                ShowImage(mJumpCanvas, "newspaper", mMenuShown);
+                mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
+                ShowMenuWidgets(false, true, false);
+            }
+            else
+            {
+                StartNightIntro();
+            }
+        }
+        break;
+    }
+
+    case State::Newspaper:
+        // Fades in and stays a few seconds; A or START skips it.
+        mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, glm::clamp(mMenuTimer, 0.0f, 1.0f)));
+        if (mMenuTimer >= kNewspaperSeconds || (mMenuTimer > 0.5f && (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))))
+        {
+            StartNightIntro();
+        }
+        break;
+
+    case State::NightIntro:
+        // A burst of static that fades, then the night starts.
+        mMenuStaticQuad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, glm::clamp(1.0f - mMenuTimer * 2.0f, 0.0f, 1.0f)));
+        if (mMenuTimer >= kNightIntroSeconds)
+        {
+            StartNight();
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
 void FnafGame::UpdateHud()
 {
     const bool playing = (mState == State::Playing || mState == State::PowerOut);
@@ -1300,6 +1517,8 @@ void FnafGame::StopStreams()
     mFanSound.Stop();
     mJingle.Stop();
     mCheer.Stop();
+    mMenuMusic.Stop();
+    mMenuHum.Stop();
 }
 
 void FnafGame::PlaySound(const char* name, bool loop, float volume)

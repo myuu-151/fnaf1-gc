@@ -14,6 +14,8 @@ size_chimes 352800
 size_circus 974674
 size_fan 423154
 size_laugh 243750
+size_menumusic 2749666
+size_menustatic 1483570
 size_musicbox 2718310
 size_piratesong 425984
 static 8

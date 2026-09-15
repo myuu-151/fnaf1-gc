@@ -52,6 +52,8 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 
 | Input | Action |
 |---|---|
+| D-pad up / down (main menu) | Choose New Game or Continue |
+| A or START (main menu) | Start (New Game shows the help-wanted ad first; A skips it) |
 | Control stick | Look around the office |
 | L / R | Close or open the left / right door |
 | D-pad left / right | Left / right hall light |
