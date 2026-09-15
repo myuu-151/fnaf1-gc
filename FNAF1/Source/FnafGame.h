@@ -121,6 +121,7 @@ private:
 
     // Data
     std::unordered_map<std::string, std::vector<uint8_t>> mImages;
+    std::vector<uint8_t> mFrameBuffer;      // animation frame read from the disc
     std::unordered_map<std::string, int32_t> mCounts;
     std::unordered_map<std::string, AssetRef> mSounds;
     std::vector<Sprite> mFlipFrames;

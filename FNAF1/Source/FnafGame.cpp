@@ -158,25 +158,12 @@ void FnafGame::QueueLoadJobs()
         queueImage(bg);
     }
 
-    for (const char* who : { "bonnie", "chica", "freddy", "foxy" })
-    {
-        const int32_t frames = mCounts[std::string("jump_") + who];
-        for (int32_t i = 0; i < frames; ++i)
-        {
-            snprintf(name, sizeof(name), "jump_%s_%02d", who, i);
-            queueImage(name);
-        }
-    }
+    // Jumpscare frames and Foxy's run aren't loaded here: they stay on the disc and are
+    // read one frame at a time while they play (see ShowImage), to keep RAM free.
 
     for (int32_t i = 0; i < mCounts["static"]; ++i)
     {
         snprintf(name, sizeof(name), "static_%02d", i);
-        queueImage(name);
-    }
-
-    for (int32_t i = 0; i < mCounts["foxyrun"]; ++i)
-    {
-        snprintf(name, sizeof(name), "foxyrun_%02d", i);
         queueImage(name);
     }
 
@@ -891,7 +878,8 @@ void FnafGame::UpdateJumpscare(float deltaTime)
         mJumpFrame++;
         char name[64];
         snprintf(name, sizeof(name), "jump_%s_%02d", mJumpWho.c_str(), mJumpFrame);
-        mJumpCanvas.Show(mImages[name]);
+        std::string shown;
+        ShowImage(mJumpCanvas, name, shown);
     }
     else if (mJumpFrame + 1 >= frames && mJumpTimer > 0.6f)
     {
@@ -961,7 +949,17 @@ void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string
     }
 
     auto it = mImages.find(name);
-    if (it != mImages.end() && canvas.Show(it->second))
+    if (it != mImages.end())
+    {
+        if (canvas.Show(it->second))
+        {
+            shown = name;
+        }
+        return;
+    }
+
+    // Animation frames (jumpscares, Foxy's run) are read from the disc as they play.
+    if (ReadDataFile("img/" + name + ".jpg", mFrameBuffer) && canvas.Show(mFrameBuffer))
     {
         shown = name;
     }
