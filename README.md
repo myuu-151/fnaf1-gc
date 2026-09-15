@@ -20,12 +20,10 @@ A private, personal port of Five Nights at Freddy's (all credit to Scott Cawthon
 
 Requirements:
 - devkitPro with devkitPPC
-- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built and `Octave.exe` rebuilt. Use commit `99db4e5` or later:
+- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built and `Octave.exe` rebuilt. Use commit `15172d0` or later:
   - `73155d6` makes the SD Gecko driver write at 13.5 MHz; before it, writes at 27 MHz corrupted files on passive SD adapters.
   - `99db4e5` makes the packager build a project's own `Source/` + `Makefile_GCN` (without it, it compiles Octave's Standalone game), and locks the engine's whole-file disc reads (without it, disc boots such as Dolphin can crash, see `issues/04`).
-  - **Not in the Octave repo yet:** `OctLockFileIo()` / `OctUnlockFileIo()` in `Engine/Source/System/Dolphin/System_Dolphin.cpp` (take the engine's file I/O lock; the game's reader thread holds it around every SD read, because the SD driver hangs when two threads use the card at once). Without them the game doesn't link.
-  - **Not in the Octave repo yet:** the lost-wakeup fix in `SdGeckoDma.c` `__exi_wait` (interrupts stay off across `EXI_Lock` and `LWP_ThreadSleep`), which hung a second thread waiting for the SD's EXI channel.
-  - **Not in the Octave repo yet:** `AUD_MAX_PCM_STREAMS` in `Engine/Source/Audio/Dolphin/Audio_Dolphin.cpp` raised from 4 to 8. A night streams up to 7 sounds at once (call, fan, dark ambience, eerie ambience, rare music, groans, the camera tape sound); with 4, some won't start. 8 is the most libasnd allows next to the engine's 8 normal voices.
+  - `15172d0` adds `OctLockFileIo()` / `OctUnlockFileIo()` (the game's reader thread holds the engine's file I/O lock around every SD read; without them the game doesn't link), fixes a lost wakeup in the SD driver's `__exi_wait` that hung a second thread using the card, and raises `AUD_MAX_PCM_STREAMS` from 4 to 8 (a night streams up to 7 sounds at once).
 - Python 3 with Pillow
 - ffmpeg (the script uses Octave's `External/ffmpeg/bin/ffmpeg.exe`, or `OCTAVE_FFMPEG`)
 
