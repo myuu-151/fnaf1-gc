@@ -72,6 +72,13 @@ static constexpr float kFoxyMoveInterval = 5.01f;
 static constexpr float kFoxyArriveSeconds = 25.0f;     // after leaving the cove, if nobody watches the hall
 static constexpr float kFoxyRunFrameSeconds = 1.0f / 39.0f;  // animation speed 65 at 60 fps
 static constexpr float kFoxyRunSeconds = 100.0f / 60.0f;  // the original's run: 100 frames at 60 fps
+// When Foxy forces the tablet down, the view goes to the left door, where his lunge comes in.
+// In the original it drifts there instead: the cursor is still on the tablet bar, inside the
+// "left low" pan zone, which moves the view 2 px per frame over its 320 px range (#82). That rate,
+// as a share of the pan range per second at 60 fps, is kept here for the drift version:
+//     mOfficePan = glm::max(0.0f, mOfficePan - kFoxyPanPerSecond * deltaTime);
+// (unused: with a controller there's no cursor holding the view, so ours snaps instead)
+static constexpr float kFoxyPanPerSecond = 2.0f * 60.0f / 320.0f;
 
 // Load cost of animation frames (jumpscares, Foxy's run): summed while one plays, logged when it ends.
 static constexpr uint32_t kAnimStatsMaxFrames = 40;
@@ -1463,6 +1470,7 @@ void FnafGame::UpdateFoxy(float deltaTime)
             SetLight(true, false);
             SetLight(false, false);
         }
+        mOfficePan = 0.0f;      // snap to the left door, where he lunges in
 
         const Door& door = mDoors[0];
         if (mTabletProgress > 0.0f || door.mProgress != (door.mClosed ? 1.0f : 0.0f))
@@ -1605,7 +1613,12 @@ void FnafGame::StartJumpscare(const std::string& who)
     mState = State::Jumpscare;
     mTabletUp = false;
     mTabletProgress = 0.0f;
-    mOfficePan = 0.5f;      // face the middle of the office, where the lunge happens
+    // Bonnie's and Chica's attacks center the view (the original's #229, #230); Foxy's doesn't, the
+    // view keeps drifting toward the left door where he lunges in.
+    if (who != "foxy")
+    {
+        mOfficePan = 0.5f;
+    }
 
     // The original's jumpscare animations hide Golden Freddy (#426, #427).
     mYellowBearShown = false;
@@ -1631,6 +1644,10 @@ void FnafGame::UpdateJumpscare(float deltaTime)
 {
     const int32_t frames = mCounts["jump_" + mJumpWho];
     mJumpTimer += deltaTime;
+    if (mJumpWho == "foxy")
+    {
+        mOfficePan = 0.0f;      // he lunges in at the left door
+    }
 
     // The original's animation speeds at 60 fps: Bonnie 75 (45 fps), Chica 99 (59 fps), Foxy 50
     // (30 fps), Freddy's power-out lunge 60 (36 fps).
@@ -2179,10 +2196,9 @@ void FnafGame::UpdateView(float deltaTime)
         }
         else
         {
-            // The frames are office-wide with the lunge in the middle: always draw them centered,
-            // whatever the pan, so the jumpscare never happens off-screen.
-            const float centerPanX = 0.5f * glm::max(0.0f, officeWidth - mScreenWidth);
-            mJump->SetRect(-centerPanX, 0.0f, officeWidth, mScreenHeight);
+            // The frames are office-wide. Bonnie's and Chica's are drawn with the view centered (set
+            // in StartJumpscare); Foxy's follow the view as it drifts toward the left door.
+            mJump->SetRect(-panX, 0.0f, officeWidth, mScreenHeight);
         }
     }
 }
