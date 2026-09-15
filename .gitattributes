@@ -1,0 +1,13 @@
+# Keep text files LF on every checkout (the engine and make read them directly).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ogg binary
+*.mp3 binary
+*.pcm binary
+*.rgx binary
+*.oct binary
+*.dol binary
+*.cc1 binary
+*.cch binary
+*.ccj binary

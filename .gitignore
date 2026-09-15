@@ -1,0 +1,3 @@
+# Build intermediates (the DOL is also copied into sd/)
+game/Intermediate/
+game/Build/

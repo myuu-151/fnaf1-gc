@@ -1,0 +1,7 @@
+door_l 12
+door_r 9
+flip 10
+jump_bonnie 11
+jump_chica 11
+jump_freddy 17
+static 8

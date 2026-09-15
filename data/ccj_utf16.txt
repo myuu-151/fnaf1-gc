@@ -1,0 +1,523 @@
+&(%'
+&(%'
+&(%'
+&(%'
+Five Nights at Freddy's
+D:\fnaf shit\FNAF1.mfa
+333f3
+f3fff
+Touch the screen to continue.
+night number
+night number 2
+play voice 5
+ !"#$%&
+6th night
+custom night
+continue word
+blip flash 2
+tiny lives
+DEMO?
+star 1
+play voice 1
+ !"#$%&
+Active 4
+String
+v 1.1
+Active 5
+tiny man
+demo
+new game
+play voice 2
+ !"#$%&
+Active 3
+star 2
+option selected
+ !"#$%&
+Active 2
+Active 6
+lives left
+static
+Active 8
+play voice 3
+ !"#$%&
+night word
+Ini
+String 2
+Demo
+play voice 4
+ !"#$%&
+Active
+Active
+blip flash
+Active 2
+Active 3
+String
+12:00 AM
+7th Night
+freddy activity
+move who?
+ !"#$%&
+Active 15
+Active
+loaded level
+Active 4
+location
+ready to attack left
+Active 16
+Active 2
+Active 5
+ready to attack right
+left low
+Active 3
+fast left
+Active 26
+blip
+ !"#$%&
+got you left
+1A showstage
+light on right
+set viewing to
+ !"#$%&
+fast right
+door open right
+got you right
+Active 11
+right low
+light on left
+viewing
+ !"#$%&
+panel
+Active 6
+9;<
+Active 17
+cam 2A
+Active 25
+per second
+panel 2
+frame
+door open left
+flip it
+ !"#$%&
+left door
+gXiY[\]^_`abcdef@
+fedcba`_^]\[YiXg
+cam 6 kitchen
+control room view
+ !"#$%&
+Active 10
+night word
+cam 2B
+flip up
+freddy bear
+put down
+ !"#$%&
+chica
+Active 19
+left high
+Active 8
+click cooldown
+ !"#$%&
+freddy got in
+chica activity
+cam 7 bathrooms
+Active 22
+Active 18
+flip down
+cam 3 closet
+freddy AI
+cam 4A
+power left
+7 restrooms
+flip down 2
+bonie AI
+time of day
+power left 2
+4QRTUVW{
+control room follow
+chica AI
+Active 9
+minute counter
+Active 23
+Active 13
+foxy AI
+mute call
+power down
+ !"#$%&
+random for pic
+ !"#$%&
+Active 24
+Active 14
+Active 21
+bonnie activity
+not using tablet
+1C stage B
+usage meter
+yellow bear
+fox activity
+1A show stage
+you
+Active 12
+fox progress
+last clicked
+ !"#$%&
+right high
+test
+Active 20
+vol zone
+5 backstage
+cam 4B
+bonnie
+1B dining area
+Perspective
+String 2
+Night
+flip panel
+Active 7
+right door
+whyjklmnopqrstuv@
+vutsrqponmlkjyhw
+screen follow 1
+audio only
+Active
+Active
+Active 4
+Active 2
+Active 3
+Active
+String
+Loading...
+String
+Game Over
+random
+ !"#$%&
+Backdrop
+Backdrop 2
+Backdrop
+Backdrop
+Backdrop
+Active 3
+bonnie right
+Backdrop
+Active
+chica left
+Backdrop 2
+chica right
+Backdrop 3
+Backdrop 4
+Active 5
+foxy left
+foxy right
+Backdrop 6
+String 3
+Backdrop 5
+Active 4
+freddy left
+Active 2
+freddy right
+Active 6
+String 2
+(0-2)easy  (3-6)med  (7-12)hard (12+)extreme
+bonnie left
+Backdrop
+Backdrop
+Active
+Backdrop
+Backdrop
+String
+Thanks for playing the demo!
+Get the full version for the complete
+5-day experience plus two 
+unlockable modes of gameplay!
+Freddy and his friends are waiting!
+title
+Layer 1
+static2
+darkness music
+> W
+level
+, V
+freddy
+, P
+freddy
+beatgame
+beat6
+blip3
+level
+blip3
+lives
+blip3
+blip3
+> W
+level
+level
+> W
+level
+D W
+beatgame
+> W
+beat6
+blip3
+> W
+level
+D W
+beatgame
+> W
+beat6
+> W
+level
+> W
+level
+> W
+level
+what day
+Layer 1
+blip3
+Frame 1
+Layer 1
+Layer 2
+Layer 3
+Layer 4
+	I6
+#`\
+GNJ
+HUj
+Lyx
+ppW
+	ColdPresc B
+	Buzz_Fan_Florescent2
+	BallastHumMedium2
+robotvoice
+"	*
+blip3
+	run
+&	Laugh_Giggle_Girl_1
+	SFXBible_12478
+error
+	SFXBible_12478
+error
+	SFXBible_12478
+	SFXBible_12478
+	SFXBible_12478
+	SFXBible_12478
+error
+error
+"	W
+	CAMERA_VIDEO_LOA_60105303
+MiniDV_Tape_Eject_1
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+COMPUTER_DIGITAL_L2076505
+garble1
+garble2
+garble3
+	XSCREAM
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+deep steps
+OVEN-DRA_1_GEN-HDF18119
+OVEN-DRA_2_GEN-HDF18120
+OVEN-DRA_7_GEN-HDF18121
+OVEN-DRA_7_GEN-HDF18121
+OVEN-DRAWE_GEN-HDF18122
+	pirate song2
+circus
+DOOR_POUNDING_ME_D0291401
+	music box
+	music box
+Vocals_Breaths_S_35972006
+Vocals_Breaths_S_35972008
+Vocals_Breaths_S_35972012
+Vocals_Breaths_S_35972014
+	powerdown
+	ambience2
+Buzz_Fan_Florescent2
+	put down
+"	W
+XSCREAM
+> W
+lives
+knock2
+windowscare
+windowscare
+, V
+freddy
+, P
+freddy
+level
+> W
+level
+> W
+lives
+> W
+lives
+PartyFavorraspyPart_AC01__3
+%	EerieAmbienceLargeSca_MV005
+voiceover1c
+*	voiceover2a
++	voiceover3
+,	voiceover4
+-	voiceover5
+music box
+music box
+8	Laugh_Giggle_Girl_1d
+running fast3
+9	Laugh_Giggle_Girl_2d
+running fast3
+:	Laugh_Giggle_Girl_8d
+running fast3
+whispering2
+XSCREAM
+died
+Layer 1
+	static
+freddy
+Layer 1
+XSCREAM
+static
+next day
+Layer 1
+chimes 2
+, V
+freddy
+, P
+freddy
+CROWD_SMALL_CHIL_EC049202
+> W
+beat6
+wait
+Layer 1
+gameover
+Layer 1
+the end
+Layer 1
+	music box
+, V
+freddy
+, P
+freddy
+D W
+beatgame
+Layer 1
+the end 2
+Layer 1
+	music box
+, V
+freddy
+, P
+freddy
+D W
+beatgame
+customize
+Layer 1
+the end 3
+Layer 1
+	music box
+, V
+freddy
+, P
+freddy
+D W
+beatgame
+creepy start
+Layer 1
+creepy end
+Layer 1
+XSCREAM2
+end of demo
+Layer 1
+music box
+EE!"!"
+3  
+XaXa:
+XaXa<
+XaXa=##
+?##
+@##
+P  
+vJ7J7
+at0
+aq0
+as0
+as0
+as0
+as0
+dx2
+LCD Solid
+Lucida Sans Unicode
+Consolas
+Consolas
+LCD Solid
+Consolas
+Tahoma
+ColdPresc B
+BallastHumMedium2
+Buzz_Fan_Florescent2
+SFXBible_12478
+MiniDV_Tape_Eject_1
+CAMERA_VIDEO_LOA_60105303
+put down
+COMPUTER_DIGITAL_L2076505	
+deep steps
+blip3
+garble1
+garble2
+garble3
+XSCREAM
+OVEN-DRA_1_GEN-HDF18119
+OVEN-DRA_2_GEN-HDF18120
+OVEN-DRA_7_GEN-HDF18121
+OVEN-DRAWE_GEN-HDF18122
+static
+error
+pirate song2
+Vocals_Breaths_S_35972006
+Vocals_Breaths_S_35972008
+Vocals_Breaths_S_35972012
+Vocals_Breaths_S_35972014
+	powerdown
+	ambience2
+circus
+	music box 
+chimes 2!
+CROWD_SMALL_CHIL_EC049202
+run
+knock2
+windowscare"
+static2#
+darkness music$
+PartyFavorraspyPart_AC01__3%
+EerieAmbienceLargeSca_MV005)
+voiceover1c*
+voiceover2a+
+voiceover3,
+voiceover4-
+voiceover5'
+DOOR_POUNDING_ME_D0291401(
+robotvoice7
+running fast38
+Laugh_Giggle_Girl_1d9
+Laugh_Giggle_Girl_2d:
+Laugh_Giggle_Girl_8d;
+whispering2&
+Laugh_Giggle_Girl_1.
+XSCREAM2
