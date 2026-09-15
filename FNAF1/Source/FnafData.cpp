@@ -145,6 +145,106 @@ bool LoadSprite(const std::string& relPath, Sprite& out)
     return true;
 }
 
+bool ReadDataRange(const std::string& relPath, uint32_t offset, uint32_t size, char* out)
+{
+    std::string path = kDataRoot + relPath;
+    return SYS_ReadFileRange(path.c_str(), true, offset, size, out);
+}
+
+static constexpr uint32_t kStreamRate = 22050;
+static constexpr uint32_t kStreamChunkBytes = (kStreamRate / 5) * 2;   // 0.2 s per read
+static constexpr uint64_t kStreamAheadFrames = kStreamRate / 2;        // keep ~0.5 s queued
+
+PcmPlayer::~PcmPlayer()
+{
+    Stop();
+}
+
+bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop, float volume)
+{
+    Stop();
+
+    if (sizeBytes < 2)
+    {
+        LogError("FNAF1: stream %s has no data", relPath.c_str());
+        return false;
+    }
+
+    mStream = AUD_OpenStream(kStreamRate, 1);
+    if (mStream == 0)
+    {
+        LogError("FNAF1: no free audio stream for %s", relPath.c_str());
+        return false;
+    }
+
+    mPath = relPath;
+    mSize = sizeBytes & ~1u;
+    mOffset = 0;
+    mQueuedFrames = 0;
+    mLoop = loop;
+    mChunk.resize(kStreamChunkBytes);
+
+    AUD_SetStreamVolume(mStream, volume);
+    Update();
+    AUD_SetStreamPaused(mStream, false);
+    return true;
+}
+
+void PcmPlayer::Stop()
+{
+    if (mStream != 0)
+    {
+        AUD_CloseStream(mStream);
+        mStream = 0;
+    }
+}
+
+bool PcmPlayer::IsPlaying() const
+{
+    return mStream != 0;
+}
+
+void PcmPlayer::Update()
+{
+    if (mStream == 0)
+    {
+        return;
+    }
+
+    const uint64_t played = AUD_GetStreamPlayedFrames(mStream);
+
+    while (mQueuedFrames < played + kStreamAheadFrames)
+    {
+        if (mOffset >= mSize)
+        {
+            if (!mLoop)
+            {
+                break;
+            }
+            mOffset = 0;
+        }
+
+        const uint32_t bytes = glm::min(kStreamChunkBytes, mSize - mOffset);
+        if (!ReadDataRange(mPath, mOffset, bytes, mChunk.data()))
+        {
+            LogError("FNAF1: stream read failed for %s", mPath.c_str());
+            Stop();
+            return;
+        }
+
+        AUD_QueueStreamData(mStream, (const uint8_t*)mChunk.data(), bytes);
+        mQueuedFrames += bytes / 2;
+        mOffset += bytes;
+    }
+
+    // A one-shot sound is done once everything queued has played (the played count
+    // advances in 1024-sample steps at 48 kHz, so allow a little slack).
+    if (!mLoop && mOffset >= mSize && played + 1024 >= mQueuedFrames)
+    {
+        Stop();
+    }
+}
+
 SoundWave* LoadPcmSound(const std::string& relPath, uint32_t sampleRate)
 {
     std::vector<uint8_t> file;

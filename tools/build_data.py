@@ -39,8 +39,9 @@ BACKGROUNDS = {
     "office": 39, "office_light_l": 58, "office_light_r": 127,
     "office_bonnie": 225, "office_chica": 227, "office_dark": 521,
     # cameras
-    # Show Stage: 19 = normal pose (2 is the rare everyone-stares frame); alone, Freddy looks at the camera (355).
-    "cam1a_all": 19, "cam1a_no_bonnie": 68, "cam1a_no_chica": 223, "cam1a_freddy": 355,
+    # Show Stage: 19 = normal pose (2 is the rare everyone-stares frame); alone, Freddy faces forward (224; 355 is him staring).
+    "cam1a_all": 19, "cam1a_no_bonnie": 68, "cam1a_no_chica": 223, "cam1a_freddy": 224,
+    "cam1a_freddy_stare": 355,      # rare variant ("random for pic" in the original)
     "cam1b_empty": 48, "cam1b_bonnie": 90, "cam1b_chica": 215,
     "cam1c_0": 66, "cam1c_1": 211, "cam1c_2": 338, "cam1c_3": 240,   # Pirate Cove: closed, peeking, stepping out, gone
     "cam5_empty": 83, "cam5_bonnie": 205,
@@ -78,7 +79,25 @@ SOUNDS = {
     "steps": (9, None),          # deep steps
     "powerdown": (26, 6.0),
     "run": (55, None),           # running fast3
-    "knock": (27, None),         # knock2
+    "knock": (39, None),         # DOOR_POUNDING_ME: Foxy banging on the left door
+    "piratesong": (21, None),    # pirate song2: Foxy humming in Pirate Cove
+    "camup": (6, None),          # CAMERA_VIDEO_LOA (raising the tablet)
+    "camhum": (8, None),         # COMPUTER_DIGITAL (monitor hum while it's up)
+    "garble1": (12, None),       # camera garbles when someone moves on camera
+    "garble2": (13, None),
+    "garble3": (14, None),
+    "pots1": (16, None),         # OVEN-DRA: Chica in the kitchen
+    "pots2": (17, None),
+    "pots3": (19, None),
+    "cheer": (33, None),         # CROWD_SMALL_CHIL (6 AM)
+    "laugh": (56, None),         # Laugh_Giggle_Girl_1d (Freddy)
+}
+
+# Long sounds, streamed from the disc at runtime instead of loaded into RAM.
+STREAMS = {
+    "call": (41, None),          # voiceover1c: the night 1 phone call
+    "ambience": (28, None),      # ambience2
+    "musicbox": (30, None),      # music box (power out)
 }
 
 
@@ -234,8 +253,9 @@ def build_fan():
     return {"fan": len(frames)}
 
 
-def build_sounds():
-    for name, (number, max_seconds) in SOUNDS.items():
+def build_sounds(table):
+    sizes = {}
+    for name, (number, max_seconds) in table.items():
         src = os.path.join(SRC, "%04d.ogg" % number)
         dst = os.path.join(DATA, "snd", name + ".pcm")
         cmd = [FFMPEG, "-v", "error", "-y", "-i", src, "-ac", "1", "-ar", "22050"]
@@ -243,7 +263,9 @@ def build_sounds():
             cmd += ["-t", str(max_seconds)]
         cmd += ["-f", "s16le", dst]
         subprocess.run(cmd, check=True)
-        print("sound %s: %d KB" % (name, os.path.getsize(dst) // 1024))
+        sizes[name] = os.path.getsize(dst)
+        print("sound %s: %d KB" % (name, sizes[name] // 1024))
+    return sizes
 
 
 def main():
@@ -273,7 +295,9 @@ def main():
     counts.update(build_doors())
     counts.update(build_fan())
     build_buttons()
-    build_sounds()
+    build_sounds(SOUNDS)
+    for name, size in build_sounds(STREAMS).items():
+        counts["size_" + name] = size
 
     with open(os.path.join(DATA, "manifest.txt"), "w", newline="\n") as f:
         for key in sorted(counts):

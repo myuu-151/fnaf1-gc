@@ -45,6 +45,10 @@ static constexpr int32_t kBonnieBaseAi = 3;
 static constexpr int32_t kChicaBaseAi = 3;
 static constexpr int32_t kFoxyBaseAi = 2;
 
+// Rare camera pictures (the original rolls a "random for pic" counter). Placeholder odds:
+// the real value is in the game's compiled events, not decoded yet.
+static constexpr int32_t kRarePicOdds = 20;
+
 // Foxy
 static constexpr float kFoxyMoveInterval = 5.01f;
 static constexpr float kFoxyArriveSeconds = 25.0f;     // after leaving the cove, if nobody watches the hall
@@ -73,7 +77,7 @@ static const CameraInfo kCameras[kNumCameras] = {
 
 static const char* kBackgrounds[] = {
     "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark",
-    "cam1a_all", "cam1a_no_bonnie", "cam1a_no_chica", "cam1a_freddy",
+    "cam1a_all", "cam1a_no_bonnie", "cam1a_no_chica", "cam1a_freddy", "cam1a_freddy_stare",
     "cam1b_empty", "cam1b_bonnie", "cam1b_chica", "cam1c_0", "cam1c_1", "cam1c_2", "cam1c_3",
     "cam5_empty", "cam5_bonnie", "cam7_empty", "cam7_chica",
     "cam2a_empty", "cam2a_bonnie", "cam3_empty", "cam3_bonnie",
@@ -83,6 +87,8 @@ static const char* kBackgrounds[] = {
 
 static const char* kSoundNames[] = {
     "fan", "light", "door", "blip", "tablet", "scream", "windowscare", "chimes", "steps", "powerdown", "run", "knock",
+    "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3", "cheer", "laugh",
+    "piratesong",
 };
 
 // SD diagnostic log (Octave System_Dolphin.cpp; writes /octiso.log when the local logger is enabled).
@@ -367,6 +373,7 @@ void FnafGame::BuildLoadingUi()
 void FnafGame::StartNight()
 {
     AudioManager::StopAllSounds();
+    StopStreams();
 
     mState = State::Playing;
     mNightTime = 0.0f;
@@ -414,6 +421,13 @@ void FnafGame::StartNight()
     ShowMessage("");
 
     PlaySound("fan", true, 0.6f);
+
+    mAmbience.Start("snd/ambience.pcm", (uint32_t)mCounts["size_ambience"], true, 0.35f);
+    mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 1.0f);
+    mCameraFresh = true;
+    mPotsTimer = 3.0f;
+    mCheerTimer = 0.0f;
+    mLaughed = false;
 }
 
 void FnafGame::Update(float deltaTime)
@@ -436,6 +450,10 @@ void FnafGame::Update(float deltaTime)
         return;
     }
 
+    mCall.Update();
+    mAmbience.Update();
+    mMusicBox.Update();
+
     deltaTime = glm::min(deltaTime, 0.1f);
 
     switch (mState)
@@ -451,6 +469,14 @@ void FnafGame::Update(float deltaTime)
 
     case State::GameOver:
     case State::Win:
+        if (mCheerTimer > 0.0f)
+        {
+            mCheerTimer -= deltaTime;
+            if (mCheerTimer <= 0.0f)
+            {
+                PlaySound("cheer", false, 0.9f);
+            }
+        }
         if (Pressed(GAMEPAD_START) || Pressed(GAMEPAD_A))
         {
             StartNight();
@@ -475,7 +501,9 @@ void FnafGame::UpdatePlaying(float deltaTime)
         if (mHour >= 6)
         {
             AudioManager::StopAllSounds();
+            StopStreams();
             PlaySound("chimes");
+            mCheerTimer = 6.0f;
             mState = State::Win;
             mTabletUp = false;
             ShowMessage("6 AM");
@@ -486,6 +514,12 @@ void FnafGame::UpdatePlaying(float deltaTime)
     if (mState == State::PowerOut)
     {
         mPowerOutTimer += deltaTime;
+        if (mPowerOutTimer > 7.0f && !mLaughed)
+        {
+            mLaughed = true;
+            mMusicBox.Stop();
+            PlaySound("laugh");
+        }
         if (mPowerOutTimer > 10.0f)
         {
             StartJumpscare("freddy");
@@ -501,6 +535,23 @@ void FnafGame::UpdatePlaying(float deltaTime)
     if (mState != State::Playing)
     {
         return;
+    }
+
+    // Chica in the kitchen rattles pots and pans; loud when you're on CAM 6.
+    if (mChica.mRoom == Room::Kitchen)
+    {
+        mPotsTimer -= deltaTime;
+        if (mPotsTimer <= 0.0f)
+        {
+            static const char* kPots[] = { "pots1", "pots2", "pots3" };
+            const bool watchingKitchen = mTabletUp && (Room)mCameraIndex == Room::Kitchen;
+            PlaySound(kPots[rand() % 3], false, watchingKitchen ? 0.9f : 0.25f);
+            mPotsTimer = 5.0f + (rand() % 400) / 100.0f;
+        }
+    }
+    else
+    {
+        mPotsTimer = 1.0f;
     }
 
     // Power: each thing in use adds a bar.
@@ -524,7 +575,10 @@ void FnafGame::UpdatePlaying(float deltaTime)
             door.mLight = false;
         }
         AudioManager::StopAllSounds();
+        StopStreams();
         PlaySound("powerdown");
+        mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], false, 0.8f);
+        mLaughed = false;
     }
 }
 
@@ -542,16 +596,30 @@ void FnafGame::UpdateInput(float deltaTime)
 
     const bool intruder = IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office);
 
+    // Z mutes the phone call, like the original's "mute call" button.
+    if (Pressed(GAMEPAD_Z) && mCall.IsPlaying())
+    {
+        mCall.Stop();
+    }
+
     if (Pressed(GAMEPAD_A))
     {
         mTabletUp = !mTabletUp;
         mTabletUpTime = 0.0f;
-        PlaySound("tablet");
         if (mTabletUp)
         {
+            PlaySound("camup");
+            PlaySound("camhum", true, 0.5f);
             SetLight(true, false);
             SetLight(false, false);
             mStaticTimer = kStaticSeconds;
+            mRandomForPic = (rand() % kRarePicOdds) + 1;
+            mCameraFresh = true;
+        }
+        else
+        {
+            PlaySound("tablet");
+            StopSound("camhum");
         }
     }
 
@@ -566,7 +634,16 @@ void FnafGame::UpdateInput(float deltaTime)
             {
                 mCameraIndex = (mCameraIndex + step + kNumCameras) % kNumCameras;
                 mStaticTimer = kStaticSeconds;
+                mRandomForPic = (rand() % kRarePicOdds) + 1;
+                mCameraFresh = true;
                 PlaySound("blip");
+
+                // Now and then Foxy hums while you look into Pirate Cove.
+                if ((Room)mCameraIndex == Room::PirateCove && mFoxyStage < 3 && (rand() % 4) == 0 &&
+                    !AudioManager::IsSoundPlaying(mSounds["piratesong"].Get<SoundWave>()))
+                {
+                    PlaySound("piratesong", false, 0.5f);
+                }
             }
         }
         return;
@@ -652,6 +729,7 @@ void FnafGame::UpdateAnimatronics(float deltaTime)
             {
                 mTabletUp = false;
                 PlaySound("tablet");
+                StopSound("camhum");
             }
             if (!mTabletUp && mTabletProgress <= 0.0f && a->mOfficeTimer > 0.8f)
             {
@@ -856,6 +934,7 @@ void FnafGame::SetLight(bool left, bool on)
 void FnafGame::StartJumpscare(const std::string& who)
 {
     AudioManager::StopAllSounds();
+    StopStreams();
     PlaySound("scream");
 
     mState = State::Jumpscare;
@@ -914,7 +993,7 @@ std::string FnafGame::GetCameraImage(Room camera) const
         if (bonnie && chica) return "cam1a_all";
         if (bonnie) return "cam1a_no_chica";
         if (chica) return "cam1a_no_bonnie";
-        return "cam1a_freddy";
+        return (mRandomForPic == 1) ? "cam1a_freddy_stare" : "cam1a_freddy";
     case Room::DiningArea:   return bonnie ? "cam1b_bonnie" : (chica ? "cam1b_chica" : "cam1b_empty");
     case Room::PirateCove:
     {
@@ -1025,8 +1104,16 @@ void FnafGame::UpdateView(float deltaTime)
             if (!runFrame)
             {
                 mStaticTimer = glm::max(mStaticTimer, 0.1f);
+
+                // Someone moved on the camera you're watching: the feed garbles.
+                if (!mCameraFresh)
+                {
+                    static const char* kGarbles[] = { "garble1", "garble2", "garble3" };
+                    PlaySound(kGarbles[rand() % 3], false, 0.7f);
+                }
             }
         }
+        mCameraFresh = false;
 
         // The camera slowly pans back and forth.
         const float pan = (sin(mCameraPanTime * 0.35f) * 0.5f + 0.5f) * glm::max(0.0f, officeWidth - mScreenWidth);
@@ -1101,6 +1188,13 @@ void FnafGame::ShowMessage(const std::string& message)
 {
     mMessageText->SetText(message);
     mMessageText->SetVisible(!message.empty());
+}
+
+void FnafGame::StopStreams()
+{
+    mCall.Stop();
+    mAmbience.Stop();
+    mMusicBox.Stop();
 }
 
 void FnafGame::PlaySound(const char* name, bool loop, float volume)

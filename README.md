@@ -4,7 +4,7 @@ A private, personal port of Five Nights at Freddy's (all credit to Scott Cawthon
 
 `FNAF1/` is an Octave C++ project packaged with Octave's own packager. The game has no scenes and uses no editor-imported assets: its C++ builds the UI at runtime and loads its own data files. The packager includes those files and builds the GameCube disc image.
 
-**Status:** Night 1 prototype. Boots and runs from `FNAF1.iso` in Dolphin.
+**Status:** Night 1 prototype. Boots and runs from `FNAF1.iso` in Dolphin and on a real GameCube (from SD through Swiss).
 
 ## Layout
 
@@ -20,7 +20,7 @@ A private, personal port of Five Nights at Freddy's (all credit to Scott Cawthon
 
 Requirements:
 - devkitPro with devkitPPC
-- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built
+- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built. Use commit `73155d6` or later. That commit makes the SD Gecko driver write at 13.5 MHz; before it, writes at 27 MHz corrupted files on passive SD adapters.
 - An `Octave.exe` whose packager builds a project's own `Source/` + `Makefile_GCN`. This is a local change in `ActionManager.cpp` (`BuildData`), marked `LOCAL FNAF1` and not in the Octave repo. Without it the packager compiles Octave's Standalone game instead.
 - Python 3 with Pillow
 - ffmpeg (the script uses Octave's `External/ffmpeg/bin/ffmpeg.exe`, or `OCTAVE_FFMPEG`)
@@ -44,6 +44,7 @@ To only compile the DOL: `make -f Makefile_GCN` in `FNAF1/`, which writes `Build
 
 - **Dolphin:** open `FNAF1.iso`.
 - **GameCube (SD):** put `FNAF1.iso` on the SD card root and boot it from Swiss. The engine finds `/FNAF1.iso` and reads everything from it.
+  - **With two SD adapters:** the card in serial port 2 mounts first and becomes the default, so the ISO has to be on that card. Otherwise the engine falls back to the disc drive and hangs on a green screen.
 
 Booting just the DOL with loose files on the SD isn't supported. Without the ISO, the engine tries the disc drive and stalls on a green screen.
 
@@ -56,6 +57,7 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 | D-pad left / right | Left / right hall light |
 | A | Raise or lower the camera tablet |
 | D-pad left / right (tablet up) | Switch camera |
+| Z | Mute the phone call |
 | Start | Restart after a game over or 6 AM |
 
 ## What the prototype has
@@ -64,12 +66,17 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 - Power drain with the usage meter, and the clock from 12 AM to 6 AM
 - All 11 cameras, with static and slow panning, and the tablet flip
 - Bonnie and Chica moving along their routes
-- Jumpscares for Bonnie and Chica, and Freddy after a power-out
+- Jumpscares for Bonnie, Chica and Foxy, and Freddy after a power-out
+- Foxy: Pirate Cove stages, the West Hall run on CAM 2A, banging on the closed door (which costs power), and his lunge
 - Game over and 6 AM screens
+- Sound:
+  - **Streamed from the disc:** the night 1 phone call, background ambience, and the power-out music box
+  - **Short sounds:** doors, lights, fan, tablet and camera hum, camera garbles when someone moves on camera, footsteps, window scare, Chica's pots in the kitchen, Foxy's humming, running and banging, Freddy's laugh, the 6 AM chimes and cheering
 
 Not in it yet:
-- Freddy roaming and Foxy
-- The original AI tables (the prototype uses its own difficulty), nights 2–5 and the phone calls
+- Freddy roaming
+- The original AI tables (the prototype uses its own difficulty), and nights 2–5 with their phone calls
+- The exact odds of the rare camera pictures (placeholder: 1 in 20)
 
 ## Data formats (`FNAF1/Scripts/Data`)
 

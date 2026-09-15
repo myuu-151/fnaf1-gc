@@ -118,6 +118,7 @@ private:
 
     void PlaySound(const char* name, bool loop = false, float volume = 1.0f);
     void StopSound(const char* name);
+    void StopStreams();
 
     // Data
     std::unordered_map<std::string, std::vector<uint8_t>> mImages;
@@ -127,6 +128,11 @@ private:
     std::vector<Sprite> mFlipFrames;
     std::vector<Sprite> mFanFrames;
     Sprite mButtons[2][2][2];   // [side][doorClosed][lightOn]
+
+    // Long sounds streamed from the disc
+    PcmPlayer mCall;
+    PcmPlayer mAmbience;
+    PcmPlayer mMusicBox;
 
     std::vector<LoadJob> mLoadJobs;
     size_t mLoadNext = 0;
@@ -185,6 +191,11 @@ private:
     float mTabletProgress = 0.0f;
     float mTabletUpTime = 0.0f;
     int32_t mCameraIndex = 0;
+    int32_t mRandomForPic = 0;      // rolled on camera up/switch; 1 = show a rare picture
+    bool mCameraFresh = true;       // the view just opened or switched (no garble for that change)
+    float mPotsTimer = 0.0f;        // Chica rattling pots in the kitchen
+    float mCheerTimer = 0.0f;       // kids cheering after the 6 AM chimes
+    bool mLaughed = false;          // Freddy's laugh during the power-out
     float mCameraPanTime = 0.0f;
     float mStaticTimer = 0.0f;
     float mStaticFrameTimer = 0.0f;

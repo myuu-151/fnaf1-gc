@@ -45,3 +45,31 @@ bool LoadSprite(const std::string& relPath, Sprite& out);
 
 // 16-bit little-endian mono PCM.
 SoundWave* LoadPcmSound(const std::string& relPath, uint32_t sampleRate);
+
+// Reads part of a data file (straight from the disc image when booted from the ISO).
+bool ReadDataRange(const std::string& relPath, uint32_t offset, uint32_t size, char* out);
+
+// A long sound (phone call, ambience, music box) played from the disc through an
+// Octave PCM stream a little at a time, so it never sits in RAM. Call Update() every
+// frame. 16-bit little-endian mono PCM at 22050 Hz.
+class PcmPlayer
+{
+public:
+
+    ~PcmPlayer();
+
+    bool Start(const std::string& relPath, uint32_t sizeBytes, bool loop, float volume);
+    void Stop();
+    void Update();
+    bool IsPlaying() const;
+
+private:
+
+    uint32_t mStream = 0;
+    std::string mPath;
+    uint32_t mSize = 0;
+    uint32_t mOffset = 0;
+    uint64_t mQueuedFrames = 0;
+    bool mLoop = false;
+    std::vector<char> mChunk;
+};
