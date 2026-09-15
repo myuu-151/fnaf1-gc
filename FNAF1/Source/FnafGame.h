@@ -131,6 +131,7 @@ private:
     void UpdateRandomSounds(float deltaTime);
     void UpdateEerieAndPower(float deltaTime);
     void UpdateGoldenFreddy(float deltaTime);
+    void LoadGoldenSprite();
     void StartCreepyEnd();
     void UpdateCreepyEnd(float deltaTime);
     void SetLight(bool left, bool on);

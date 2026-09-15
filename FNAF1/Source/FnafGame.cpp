@@ -238,10 +238,6 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_first.rgx", &mIntroFirstSprite);
     queueSprite("spr/menu_night.rgx", &mIntroNightSprite);
     queueSprite("spr/menu_gameover.rgx", &mGameOverSprite);
-    // Golden Freddy in the office: loaded up front and stored at 3/4 size. Loading it at full size
-    // in the middle of a night (425 KB file + 425 KB texture) left him invisible, most likely a
-    // failed allocation.
-    queueSprite("spr/golden_office.rgx", &mGoldenSprite);
     queueSprite("spr/menu_six_5.rgx", &mWinFiveSprite);
     queueSprite("spr/menu_six_6.rgx", &mWinSixSprite);
     queueSprite("spr/menu_six_am.rgx", &mWinAmSprite);
@@ -555,6 +551,8 @@ void FnafGame::StartNight()
     mHallucinationShown.clear();
     mHallucinationQuad->SetVisible(false);
     mGoldenQuad->SetVisible(false);
+    mGoldenQuad->SetTexture(nullptr);
+    mGoldenSprite = Sprite();       // frees his picture (loaded again if he's armed)
 }
 
 void FnafGame::Update(float deltaTime)
@@ -749,6 +747,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
     if (cStickUp && !sCStickUpHeld)
     {
         mYellowBear = 1;
+        LoadGoldenSprite();
         RaiseTablet();
         mCameraIndex = (int32_t)Room::WestCorner;
         mCameraFresh = true;
@@ -1637,6 +1636,21 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     }
 }
 
+void FnafGame::LoadGoldenSprite()
+{
+    // His office picture (252x244, 240 KB) is only in RAM while his event can happen: read from the
+    // disc when he's armed, freed when the next night starts.
+    if (mGoldenSprite.Get() != nullptr)
+    {
+        return;
+    }
+    if (!LoadSprite("spr/golden_office.rgx", mGoldenSprite))
+    {
+        LogError("FNAF1: could not load golden_office (free %u KB)", GetFreeMemoryKb());
+        OctLog("FNAF1: could not load golden_office (free %u KB)", GetFreeMemoryKb());
+    }
+}
+
 void FnafGame::UpdateGoldenFreddy(float deltaTime)
 {
     // Golden Freddy, from the original's events (numbers are its event lines). Its "viewing" is 0
@@ -1654,6 +1668,7 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
     if (viewing && (Room)mCameraIndex == Room::WestCorner && !IsAt(mBonnie, Room::WestCorner) && mYellowBear == 1)
     {
         mYellowBear = 2;
+        LoadGoldenSprite();     // (a retry, if it couldn't load when he was armed)
         PlaySound("giggle", false, 2.0f);
         OctLog("FNAF1: golden freddy poster seen");
     }
@@ -1745,6 +1760,7 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
         if ((rand() % 100000) == 1)
         {
             mYellowBear = 1;
+            LoadGoldenSprite();
             OctLog("FNAF1: golden freddy armed");
         }
     }
@@ -2478,11 +2494,11 @@ void FnafGame::UpdateHud()
         static const char* kRooms[] = { "Stage", "Dining", "Cove", "Backstage", "Restrooms", "Kitchen",
                                         "W.Hall", "Closet", "W.Corner", "E.Hall", "E.Corner", "L.Door", "R.Door", "Office" };
         static const char* kLayers[] = { "dark + eerie 0", "dark + eerie 30", "dark + eerie 50", "dark + eerie 75" };
-        char debug[128];
-        snprintf(debug, sizeof(debug), "Ambience %s | Bonnie %s | Chica %s | Foxy %d | Gold %d | skips %u",
+        char debug[192];
+        snprintf(debug, sizeof(debug), "Ambience %s | Bonnie %s | Chica %s | Foxy %d | Gold %d | skips %u | free %u KB",
                  mAmbienceLayer >= 0 ? kLayers[mAmbienceLayer] : "-",
                  kRooms[(int)mBonnie.mRoom], kRooms[(int)mChica.mRoom], mFoxyStage, mYellowBear,
-                 (unsigned)GetStreamUnderruns());
+                 (unsigned)GetStreamUnderruns(), GetFreeMemoryKb());
         mDebugText->SetText(debug);
     }
 

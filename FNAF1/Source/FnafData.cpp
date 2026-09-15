@@ -114,23 +114,25 @@ Texture* Sprite::Get() const
 
 bool LoadSprite(const std::string& relPath, Sprite& out)
 {
-    std::vector<uint8_t> file;
-    if (!ReadDataFile(relPath, file))
+    // The header first, then the texels straight into the texture's memory: no second copy of
+    // the file in RAM, so a sprite loaded mid-night needs only one block the texture's size.
+    uint8_t header[8];
+    if (!ReadDataRange(relPath, 0, sizeof(header), (char*)header))
     {
         return false;
     }
 
-    if (file.size() < 8 || memcmp(file.data(), "RGX8", 4) != 0)
+    if (memcmp(header, "RGX8", 4) != 0)
     {
         LogError("FNAF1: %s is not an RGX8 sprite", relPath.c_str());
         return false;
     }
 
-    const uint32_t width = (uint32_t(file[4]) << 8) | file[5];
-    const uint32_t height = (uint32_t(file[6]) << 8) | file[7];
+    const uint32_t width = (uint32_t(header[4]) << 8) | header[5];
+    const uint32_t height = (uint32_t(header[6]) << 8) | header[7];
     const uint32_t texelBytes = width * height * 4;
 
-    if (width == 0 || height == 0 || (width % 4) != 0 || (height % 4) != 0 || file.size() < 8 + texelBytes)
+    if (width == 0 || height == 0 || (width % 4) != 0 || (height % 4) != 0)
     {
         LogError("FNAF1: %s has a bad size (%ux%u)", relPath.c_str(), width, height);
         return false;
@@ -148,8 +150,12 @@ bool LoadSprite(const std::string& relPath, Sprite& out)
         return false;
     }
 
-    // The file already holds GX_TF_RGBA8 texels, so copy them in as-is.
-    memcpy(resource->mDynamicData, file.data() + 8, texelBytes);
+    // The file already holds GX_TF_RGBA8 texels, so they're read in as-is.
+    if (!ReadDataRange(relPath, sizeof(header), texelBytes, (char*)resource->mDynamicData))
+    {
+        LogError("FNAF1: could not read sprite %s", relPath.c_str());
+        return false;
+    }
     DCFlushRange(resource->mDynamicData, texelBytes);
     GFX_SetTextureResourceData(texture, nullptr);
 
