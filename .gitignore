@@ -1,3 +1,6 @@
-# Build intermediates (the DOL is also copied into sd/)
-game/Intermediate/
-game/Build/
+# Build output (the packager writes Packaged/, including FNAF1.iso)
+FNAF1/Intermediate/
+FNAF1/Build/
+FNAF1/Generated/
+FNAF1/Packaged/
+FNAF1/Makefile_TEMP

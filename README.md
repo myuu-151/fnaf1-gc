@@ -2,45 +2,50 @@
 
 A private, personal port of Five Nights at Freddy's (all credit to Scott Cawthon) to the Nintendo GameCube, running on the [Octave](https://github.com/myuu-151/Octave-libogc) engine.
 
-It is a code-only Octave game: there is no editor project or scene. The game builds its UI at runtime and loads its own data files from the SD card.
+`FNAF1/` is an Octave C++ project packaged with Octave's own packager. The game has no scenes and uses no editor-imported assets: its C++ builds the UI at runtime and loads its own data files. The packager includes those files and builds the GameCube disc image.
 
-**Status:** Night 1 prototype. Not yet tested on hardware.
+**Status:** Night 1 prototype. Boots and runs from `FNAF1.iso` in Dolphin.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
+| `FNAF1/` | The Octave project: `FNAF1.octp`, `Config.ini`, `Source/` (game code), `Makefile_GCN`, `Assets/` (empty) |
+| `FNAF1/Scripts/Data/` | Converted game data (built by `tools/build_data.py`). It lives under `Scripts/` because the packager copies that folder (with subfolders) into the package and the disc, and only runs `.lua` files from it. |
+| `tools/build_data.py` | Converts `source/` into `FNAF1/Scripts/Data/` |
 | `source/` | The original game's HTML5 (Clickteam Fusion) export: numbered images and sounds, plus `Runtime.js` |
 | `data/` | `Application.ccj` extracted from `source/resources/FNAF1HTML5.cc1` (game logic and object/sound names), and its UTF-16 strings |
-| `tools/build_data.py` | Converts `source/` into `sd/` |
-| `game/` | The GameCube game: `Makefile_GCN` and C++ sources |
-| `sd/` | Ready-to-copy SD card contents (built) |
 
 ## Building
 
 Requirements:
 - devkitPro with devkitPPC
-- [Octave-libogc](https://github.com/myuu-151/Octave-libogc), checked out next to this repo (`Documents/octave-libogc`), with its GameCube engine library built (`Engine/Makefile_GCN`)
+- [Octave-libogc](https://github.com/myuu-151/Octave-libogc) at `Documents/octave-libogc` (the makefile's `OCTAVE` variable), with its GameCube engine library built
+- An `Octave.exe` whose packager builds a project's own `Source/` + `Makefile_GCN`. This is a local change in `ActionManager.cpp` (`BuildData`), marked `LOCAL FNAF1` and not in the Octave repo. Without it the packager compiles Octave's Standalone game instead.
 - Python 3 with Pillow
 - ffmpeg (the script uses Octave's `External/ffmpeg/bin/ffmpeg.exe`, or `OCTAVE_FFMPEG`)
-- A packaged Octave GameCube project to copy the cooked engine assets from. The default is `testproj/Packaged/GameCube`; set `OCTAVE_GCN_PACKAGE` to use another.
 
 Steps:
 
 ```sh
-# 1. Build the game (from a devkitPro shell)
-cd game
-make -f Makefile_GCN          # -> game/Build/FNAF1.dol
+# 1. Convert the game data (only needed when source/ or the converter changes)
+python tools/build_data.py
 
-# 2. Convert the data and assemble the SD folder (copies the DOL in too)
-cd ..
-python tools/build_data.py    # -> sd/
+# 2. Package with Octave (from the octave-libogc folder, with DEVKITPRO/DEVKITPPC set
+#    and devkitPro's make on PATH)
+Octave.exe -headless -project <path>/fnaf1-gc/FNAF1/FNAF1.octp -build GameCube
 ```
+
+The packager compiles `FNAF1/Makefile_GCN` and writes `FNAF1/Packaged/GameCube/`, including `FNAF1.dol` and `FNAF1.iso`.
+
+To only compile the DOL: `make -f Makefile_GCN` in `FNAF1/`, which writes `Build/GCN/FNAF1.dol`.
 
 ## Running
 
-1. Copy everything inside `sd/` to the root of the SD card: `FNAF1.dol`, `FNAF1/` and `Engine/`.
-2. Boot `FNAF1.dol` from Swiss.
+- **Dolphin:** open `FNAF1.iso`.
+- **GameCube (SD):** put `FNAF1.iso` on the SD card root and boot it from Swiss. The engine finds `/FNAF1.iso` and reads everything from it.
+
+Booting just the DOL with loose files on the SD isn't supported. Without the ISO, the engine tries the disc drive and stalls on a green screen.
 
 ## Controls
 
@@ -66,7 +71,7 @@ Not in it yet:
 - Freddy roaming and Foxy
 - The original AI tables (the prototype uses its own difficulty), nights 2–5 and the phone calls
 
-## Data formats (`sd/FNAF1/Data`)
+## Data formats (`FNAF1/Scripts/Data`)
 
 | File | Format |
 |---|---|
@@ -75,9 +80,8 @@ Not in it yet:
 | `snd/*.pcm` | 16-bit little-endian mono PCM, 22050 Hz |
 | `manifest.txt` | Frame counts: doors, jumpscares, static, tablet flip |
 
-The engine boots project `FNAF1` (`FNAF1/FNAF1.octp`) only for its own assets. `FNAF1/AssetRegistry.txt` lists just the engine assets.
-
 ## Notes
 
+- **Logging:** with Octave's local SD logger enabled, the game writes its startup steps (`FNAF1: ...`) to `/octiso.log` alongside the engine's file loads.
 - **Sound names:** these come from the game's play-sound actions in `Application.ccj` (bytes `88 00 06 00`, then a u16 sound number, then the UTF-16 name). For example, sound 15 is `XSCREAM` and sound 41 is `voiceover1c`.
 - **Door animations:** the frames come from the texture atlases. The left door's frames are 223 px wide and the right door's are 229 px, ordered by how much of the doorway they cover. The door and button positions in the office are estimates.

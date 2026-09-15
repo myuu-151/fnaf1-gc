@@ -1,20 +1,18 @@
-"""Builds the SD card folder for the GameCube FNAF1 port.
+"""Converts the original game's images and sounds into FNAF1/Scripts/Data.
 
-Reads the original game's images and sounds from source/resources (the HTML5
-export) and writes sd/, ready to copy to the root of an SD card:
+The Octave packager copies the project's Scripts folder (subfolders included) into
+the package and the ISO, and only runs .lua files from it, so the game data rides
+along there:
 
-  sd/FNAF1.dol                      (copied from game/Build after `make`)
-  sd/FNAF1/FNAF1.octp               project file Octave loads at boot
-  sd/FNAF1/AssetRegistry.txt        engine assets only (the game's data isn't Octave assets)
-  sd/FNAF1/Data/manifest.txt        frame counts
-  sd/FNAF1/Data/img/*.jpg           backgrounds: baseline 4:2:0 JPEG, decoded to YUV on the GameCube
-  sd/FNAF1/Data/spr/*.rgx           sprites with alpha: raw GX_TF_RGBA8 texels
-  sd/FNAF1/Data/snd/*.pcm           sounds: 16-bit little-endian mono PCM, 22050 Hz
-  sd/Engine/...                     cooked GameCube engine assets (from a packaged Octave project)
+  FNAF1/Scripts/Data/manifest.txt     frame counts
+  FNAF1/Scripts/Data/img/*.jpg        backgrounds: baseline 4:2:0 JPEG, decoded to YUV on the GameCube
+  FNAF1/Scripts/Data/spr/*.rgx        sprites with alpha: raw GX_TF_RGBA8 texels
+  FNAF1/Scripts/Data/snd/*.pcm        sounds: 16-bit little-endian mono PCM, 22050 Hz
+
+Then package with Octave: Octave.exe -headless -project FNAF1/FNAF1.octp -build GameCube
 """
 
 import os
-import shutil
 import struct
 import subprocess
 import sys
@@ -23,11 +21,8 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "source", "resources")
-OUT = os.path.join(ROOT, "sd")
-DATA = os.path.join(OUT, "FNAF1", "Data")
+DATA = os.path.join(ROOT, "FNAF1", "Scripts", "Data")
 FFMPEG = os.environ.get("OCTAVE_FFMPEG", r"C:\Users\NoSig\Documents\octave-libogc\External\ffmpeg\bin\ffmpeg.exe")
-ENGINE_PACKAGE = os.environ.get("OCTAVE_GCN_PACKAGE", r"C:\Users\NoSig\Documents\testproj\Packaged\GameCube")
-DOL = os.path.join(ROOT, "game", "Build", "FNAF1.dol")
 
 # Backgrounds are 1600x720 in the original; both sizes must be multiples of 16 for the decoder.
 BG_SIZE = (992, 448)
@@ -148,7 +143,7 @@ def find_sprites(sheet):
 
 def opacity(im):
     a = im.getchannel("A").resize((64, 128))
-    return sum(1 for v in a.getdata() if v > 128) / float(64 * 128)
+    return sum(1 for v in a.get_flattened_data() if v > 128) / float(64 * 128)
 
 
 def build_doors():
@@ -205,6 +200,20 @@ def build_buttons():
         sys.exit("button panels not found: %s" % missing)
 
 
+def build_fan():
+    # The office desk fan: three 138x196 frames in M0001, drawn over the office at (780, 303).
+    im, boxes = find_sprites("M0001")
+    frames = sorted([b for b in boxes if 130 <= b[2] - b[0] <= 145 and 190 <= b[3] - b[1] <= 200], key=lambda b: b[1])
+    if len(frames) != 3:
+        sys.exit("expected 3 fan frames in M0001, found %d" % len(frames))
+    for i, (x0, y0, x1, y1) in enumerate(frames):
+        spr = im.crop((x0, y0, x1, y1))
+        size = (round4((x1 - x0) * BUTTON_SCALE), round4((y1 - y0) * BUTTON_SCALE))
+        save_rgx(spr.resize(size, Image.LANCZOS), "fan_%02d" % i)
+    print("fan: %d frames" % len(frames))
+    return {"fan": len(frames)}
+
+
 def build_sounds():
     for name, (number, max_seconds) in SOUNDS.items():
         src = os.path.join(SRC, "%04d.ogg" % number)
@@ -217,27 +226,9 @@ def build_sounds():
         print("sound %s: %d KB" % (name, os.path.getsize(dst) // 1024))
 
 
-def build_engine_files():
-    shutil.copytree(os.path.join(ENGINE_PACKAGE, "Engine"), os.path.join(OUT, "Engine"), dirs_exist_ok=True)
-    registry = []
-    for sub in os.listdir(ENGINE_PACKAGE):
-        path = os.path.join(ENGINE_PACKAGE, sub, "AssetRegistry.txt")
-        if os.path.isfile(path):
-            registry = [l.strip() for l in open(path) if ",Engine/" in l]
-            break
-    if not registry:
-        sys.exit("no AssetRegistry.txt found under " + ENGINE_PACKAGE)
-    with open(os.path.join(OUT, "FNAF1", "AssetRegistry.txt"), "w", newline="\n") as f:
-        f.write("\n".join(registry) + "\n")
-    with open(os.path.join(OUT, "FNAF1", "FNAF1.octp"), "w", newline="\n") as f:
-        f.write("name=FNAF1\n")
-
-
 def main():
     for sub in ("img", "spr", "snd"):
         os.makedirs(os.path.join(DATA, sub), exist_ok=True)
-
-    build_engine_files()
 
     for name, number in BACKGROUNDS.items():
         save_jpeg(number, name, BG_SIZE)
@@ -256,6 +247,7 @@ def main():
     counts["flip"] = len(FLIP_FRAMES)
 
     counts.update(build_doors())
+    counts.update(build_fan())
     build_buttons()
     build_sounds()
 
@@ -263,17 +255,11 @@ def main():
         for key in sorted(counts):
             f.write("%s %d\n" % (key, counts[key]))
 
-    if os.path.exists(DOL):
-        shutil.copy2(DOL, os.path.join(OUT, "FNAF1.dol"))
-        print("copied", DOL)
-    else:
-        print("note: %s not built yet (run make in game/)" % DOL)
-
     total = 0
-    for dirpath, _, files in os.walk(os.path.join(OUT, "FNAF1")):
+    for dirpath, _, files in os.walk(DATA):
         total += sum(os.path.getsize(os.path.join(dirpath, f)) for f in files)
     print("counts:", counts)
-    print("FNAF1 data: %.1f MB" % (total / 1e6))
+    print("data: %.1f MB in %s" % (total / 1e6, DATA))
 
 
 if __name__ == "__main__":
