@@ -2,7 +2,9 @@ door_l 12
 door_r 9
 fan 3
 flip 10
+foxyrun 31
 jump_bonnie 11
 jump_chica 11
+jump_foxy 20
 jump_freddy 17
 static 8

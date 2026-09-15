@@ -39,12 +39,13 @@ BACKGROUNDS = {
     "office": 39, "office_light_l": 58, "office_light_r": 127,
     "office_bonnie": 225, "office_chica": 227, "office_dark": 521,
     # cameras
-    "cam1a_all": 2, "cam1a_no_bonnie": 68, "cam1a_no_chica": 223, "cam1a_freddy": 224,
+    # Show Stage: 19 = normal pose (2 is the rare everyone-stares frame); alone, Freddy looks at the camera (355).
+    "cam1a_all": 19, "cam1a_no_bonnie": 68, "cam1a_no_chica": 223, "cam1a_freddy": 355,
     "cam1b_empty": 48, "cam1b_bonnie": 90, "cam1b_chica": 215,
-    "cam1c": 66,
+    "cam1c_0": 66, "cam1c_1": 211, "cam1c_2": 338, "cam1c_3": 240,   # Pirate Cove: closed, peeking, stepping out, gone
     "cam5_empty": 83, "cam5_bonnie": 205,
     "cam7_empty": 41, "cam7_chica": 217,
-    "cam2a_empty": 44, "cam2a_bonnie": 241,
+    "cam2a_empty": 44, "cam2a_bonnie": 206,     # (241/244/340 are Foxy running)
     "cam3_empty": 62, "cam3_bonnie": 190,
     "cam2b_empty": 0, "cam2b_bonnie": 188,
     "cam4a_empty": 67, "cam4a_chica": 221,
@@ -55,7 +56,12 @@ JUMPSCARES = {
     "bonnie": [291] + list(range(293, 302)) + [303],
     "chica": list(range(228, 238)) + [239],
     "freddy": list(range(485, 519, 2)),
+    "foxy": [413, 242, 243] + list(range(396, 413)),     # lunging in from the left doorway
 }
+# Foxy running down the West Hall (CAM 2A), far to past the camera.
+# Every West Hall frame with Foxy (found by matching the hall's poster wall); the
+# numbers interleave with other animations (e.g. 292 and 302 sit inside Bonnie's).
+FOXY_RUN = [241, 340] + list(range(244, 251)) + [280] + list(range(282, 291)) + [292, 302, 306, 327] + list(range(329, 338))   # 337 = last frame (empty hall)
 STATIC_FRAMES = [12, 13, 14, 15, 16, 17, 18, 20]
 FLIP_FRAMES = [142, 46, 144, 132, 133, 136, 137, 138, 139, 140]
 
@@ -71,6 +77,8 @@ SOUNDS = {
     "chimes": (32, 8.0),         # chimes 2
     "steps": (9, None),          # deep steps
     "powerdown": (26, 6.0),
+    "run": (55, None),           # running fast3
+    "knock": (27, None),         # knock2
 }
 
 
@@ -175,8 +183,10 @@ def build_doors():
 
 
 def build_buttons():
-    # Door/light button panels (about 57x172). Green door button = door closed,
-    # bright light button = light on.
+    # Door/light button panels (about 58x174): one set of four per wall. Green door
+    # button = door closed, bright light button = light on. The side shows in the
+    # buttons' white edge highlight: on the left edge for the left-wall panel, on
+    # the right edge for the right-wall panel (checked in Dolphin).
     found = {}
     for sheet in ["M0004", "M0003"]:
         im, boxes = find_sprites(sheet)
@@ -185,17 +195,27 @@ def build_buttons():
             if not (48 <= w <= 72 and 155 <= h <= 190):
                 continue
             spr = im.crop((x0, y0, x1, y1)).convert("RGBA")
-            top = spr.crop((0, int(h * 0.1), w, int(h * 0.4))).convert("RGB").resize((1, 1)).getpixel((0, 0))
-            bottom = spr.crop((0, int(h * 0.6), w, int(h * 0.9))).convert("RGB").resize((1, 1)).getpixel((0, 0))
+            rgb = spr.convert("RGB")
+            top = rgb.crop((0, int(h * 0.1), w, int(h * 0.4))).resize((1, 1)).getpixel((0, 0))
+            bottom = rgb.crop((0, int(h * 0.6), w, int(h * 0.9))).resize((1, 1)).getpixel((0, 0))
             closed = 1 if top[1] > top[0] else 0
             light = 1 if sum(bottom) / 3.0 > 90 else 0
-            key = "btn_c%d_l%d" % (closed, light)
+
+            # Brightest column band across the door button: highlight on the left or right?
+            band = rgb.crop((0, int(h * 0.12), w, int(h * 0.35))).convert("L")
+            columns = [sum(band.getpixel((x, y)) for y in range(band.size[1])) for x in range(w)]
+            left_peak = max(columns[int(w * 0.1):int(w * 0.35)])
+            right_peak = max(columns[int(w * 0.65):int(w * 0.9)])
+            side = "r" if right_peak > left_peak else "l"
+
+            key = "btn_%s_c%d_l%d" % (side, closed, light)
             if key not in found:
                 found[key] = spr
                 size = (round4(w * BUTTON_SCALE), round4(h * BUTTON_SCALE))
                 save_rgx(spr.resize(size, Image.LANCZOS), key)
                 print("%s from %s at (%d,%d) %dx%d -> %dx%d" % (key, sheet, x0, y0, w, h, size[0], size[1]))
-    missing = [k for k in ("btn_c0_l0", "btn_c0_l1", "btn_c1_l0", "btn_c1_l1") if k not in found]
+    expected = ["btn_%s_c%d_l%d" % (s, c, l) for s in "lr" for c in (0, 1) for l in (0, 1)]
+    missing = [k for k in expected if k not in found]
     if missing:
         sys.exit("button panels not found: %s" % missing)
 
@@ -241,6 +261,10 @@ def main():
     for i, n in enumerate(STATIC_FRAMES):
         save_jpeg(n, "static_%02d" % i, STATIC_SIZE)
     counts["static"] = len(STATIC_FRAMES)
+    foxy_run = [n for n in FOXY_RUN if os.path.exists(src_png(n))]   # the numbering has gaps (e.g. no 0249)
+    for i, n in enumerate(foxy_run):
+        save_jpeg(n, "foxyrun_%02d" % i, BG_SIZE)
+    counts["foxyrun"] = len(foxy_run)
 
     for i, n in enumerate(FLIP_FRAMES):
         save_rgx(Image.open(src_png(n)).resize(FLIP_SIZE, Image.LANCZOS), "flip_%02d" % i)

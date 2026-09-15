@@ -43,6 +43,12 @@ static constexpr uint64_t kLoadBudgetUs = 30000;  // loading work per frame
 // Prototype difficulty: a bit above the original Night 1 so things happen.
 static constexpr int32_t kBonnieBaseAi = 3;
 static constexpr int32_t kChicaBaseAi = 3;
+static constexpr int32_t kFoxyBaseAi = 2;
+
+// Foxy
+static constexpr float kFoxyMoveInterval = 5.01f;
+static constexpr float kFoxyArriveSeconds = 25.0f;     // after leaving the cove, if nobody watches the hall
+static constexpr float kFoxyRunFrameSeconds = 1.0f / 20.0f;
 
 struct CameraInfo
 {
@@ -68,7 +74,7 @@ static const CameraInfo kCameras[kNumCameras] = {
 static const char* kBackgrounds[] = {
     "office", "office_light_l", "office_light_r", "office_bonnie", "office_chica", "office_dark",
     "cam1a_all", "cam1a_no_bonnie", "cam1a_no_chica", "cam1a_freddy",
-    "cam1b_empty", "cam1b_bonnie", "cam1b_chica", "cam1c",
+    "cam1b_empty", "cam1b_bonnie", "cam1b_chica", "cam1c_0", "cam1c_1", "cam1c_2", "cam1c_3",
     "cam5_empty", "cam5_bonnie", "cam7_empty", "cam7_chica",
     "cam2a_empty", "cam2a_bonnie", "cam3_empty", "cam3_bonnie",
     "cam2b_empty", "cam2b_bonnie", "cam4a_empty", "cam4a_chica",
@@ -76,7 +82,7 @@ static const char* kBackgrounds[] = {
 };
 
 static const char* kSoundNames[] = {
-    "fan", "light", "door", "blip", "tablet", "scream", "windowscare", "chimes", "steps", "powerdown",
+    "fan", "light", "door", "blip", "tablet", "scream", "windowscare", "chimes", "steps", "powerdown", "run", "knock",
 };
 
 // SD diagnostic log (Octave System_Dolphin.cpp; writes /octiso.log when the local logger is enabled).
@@ -152,7 +158,7 @@ void FnafGame::QueueLoadJobs()
         queueImage(bg);
     }
 
-    for (const char* who : { "bonnie", "chica", "freddy" })
+    for (const char* who : { "bonnie", "chica", "freddy", "foxy" })
     {
         const int32_t frames = mCounts[std::string("jump_") + who];
         for (int32_t i = 0; i < frames; ++i)
@@ -165,6 +171,12 @@ void FnafGame::QueueLoadJobs()
     for (int32_t i = 0; i < mCounts["static"]; ++i)
     {
         snprintf(name, sizeof(name), "static_%02d", i);
+        queueImage(name);
+    }
+
+    for (int32_t i = 0; i < mCounts["foxyrun"]; ++i)
+    {
+        snprintf(name, sizeof(name), "foxyrun_%02d", i);
         queueImage(name);
     }
 
@@ -194,12 +206,15 @@ void FnafGame::QueueLoadJobs()
         }
     }
 
-    for (int32_t closed = 0; closed < 2; ++closed)
+    for (int32_t side = 0; side < 2; ++side)
     {
-        for (int32_t light = 0; light < 2; ++light)
+        for (int32_t closed = 0; closed < 2; ++closed)
         {
-            snprintf(name, sizeof(name), "spr/btn_c%d_l%d.rgx", closed, light);
-            queueSprite(name, &mButtons[closed][light]);
+            for (int32_t light = 0; light < 2; ++light)
+            {
+                snprintf(name, sizeof(name), "spr/btn_%c_c%d_l%d.rgx", side == 0 ? 'l' : 'r', closed, light);
+                queueSprite(name, &mButtons[side][closed][light]);
+            }
         }
     }
 
@@ -307,16 +322,17 @@ void FnafGame::BuildUi()
         mDoors[side].mButton = mRoot->CreateChild<Quad>(side == 0 ? "ButtonLeft" : "ButtonRight");
     }
 
-    // The button panel art faces the right-hand wall; mirror it for the left one.
-    // (Quad texcoords are (corner + offset) * scale.)
-    mDoors[0].mButton->SetUvScale(glm::vec2(-1.0f, 1.0f));
-    mDoors[0].mButton->SetUvOffset(glm::vec2(-1.0f, 0.0f));
-
     mFlip = mRoot->CreateChild<Quad>("TabletFlip");
     mFlip->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
 
     mCamera = mRoot->CreateChild<Quad>("Camera");
     mCamera->SetTexture(mCameraCanvas.GetTexture());
+
+    // Kitchen camera: audio only, so the screen goes black.
+    mCameraBlack = mRoot->CreateChild<Quad>("CameraBlack");
+    mCameraBlack->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
+    mCameraBlack->SetColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    mCameraBlack->SetVisible(false);
 
     mStatic = mRoot->CreateChild<Quad>("Static");
     mStatic->SetTexture(mStaticCanvas.GetTexture());
@@ -395,6 +411,15 @@ void FnafGame::StartNight()
     mChica.mName = "chica";
     mChica.mLeftSide = false;
     mChica.mMoveInterval = 4.98f;
+
+    mFoxyStage = 0;
+    mFoxyMoveTimer = 0.0f;
+    mFoxyLockTimer = 0.0f;
+    mFoxyRunTimer = 0.0f;
+    mFoxyRunning = false;
+    mFoxyRunFrame = 0;
+    mFoxyRunFrameTimer = 0.0f;
+    mFoxyKnocks = 0;
 
     mOfficeShown.clear();
     mCameraShown.clear();
@@ -484,6 +509,12 @@ void FnafGame::UpdatePlaying(float deltaTime)
     UpdateInput(deltaTime);
     UpdateTablet(deltaTime);
     UpdateAnimatronics(deltaTime);
+    UpdateFoxy(deltaTime);
+
+    if (mState != State::Playing)
+    {
+        return;
+    }
 
     // Power: each thing in use adds a bar.
     mUsage = 1;
@@ -716,6 +747,100 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
     }
 }
 
+void FnafGame::UpdateFoxy(float deltaTime)
+{
+    if (mState != State::Playing)
+    {
+        return;
+    }
+
+    if (mFoxyRunning)
+    {
+        // The run plays out on CAM 2A; he reaches the door when it ends.
+        mFoxyRunFrameTimer += deltaTime;
+        while (mFoxyRunFrameTimer >= kFoxyRunFrameSeconds)
+        {
+            mFoxyRunFrameTimer -= kFoxyRunFrameSeconds;
+            mFoxyRunFrame++;
+        }
+        if (mFoxyRunFrame >= mCounts["foxyrun"])
+        {
+            FoxyArrive();
+        }
+        return;
+    }
+
+    if (mFoxyStage < 3)
+    {
+        // Watching the cameras keeps him in the cove, and he stays put for a while after.
+        if (mTabletUp)
+        {
+            mFoxyLockTimer = 0.83f + (rand() % 1584) / 100.0f;
+            return;
+        }
+
+        if (mFoxyLockTimer > 0.0f)
+        {
+            mFoxyLockTimer -= deltaTime;
+            return;
+        }
+
+        mFoxyMoveTimer += deltaTime;
+        if (mFoxyMoveTimer >= kFoxyMoveInterval)
+        {
+            mFoxyMoveTimer -= kFoxyMoveInterval;
+            const int32_t ai = kFoxyBaseAi + (mHour >= 3) + (mHour >= 4);
+            if ((rand() % 20) + 1 <= ai)
+            {
+                mFoxyStage++;
+                LogDebug("FNAF1: foxy stage %d", mFoxyStage);
+                if (mFoxyStage == 3)
+                {
+                    mFoxyRunTimer = kFoxyArriveSeconds;
+                }
+            }
+        }
+        return;
+    }
+
+    // Out of the cove: checking the West Hall sets him running, otherwise he comes anyway.
+    const bool watchingWestHall = mTabletUp && mTabletProgress >= 1.0f && (Room)mCameraIndex == Room::WestHall;
+    if (watchingWestHall)
+    {
+        mFoxyRunning = true;
+        mFoxyRunFrame = 0;
+        mFoxyRunFrameTimer = 0.0f;
+        PlaySound("run");
+        return;
+    }
+
+    mFoxyRunTimer -= deltaTime;
+    if (mFoxyRunTimer <= 0.0f)
+    {
+        PlaySound("run");
+        FoxyArrive();
+    }
+}
+
+void FnafGame::FoxyArrive()
+{
+    mFoxyRunning = false;
+
+    if (mDoors[0].mClosed)
+    {
+        // Bangs on the door, drains power (more each time), and goes back to the cove.
+        PlaySound("knock");
+        mPower = glm::max(0.0f, mPower - (1.0f + 5.0f * mFoxyKnocks));
+        mFoxyKnocks++;
+        mFoxyStage = rand() % 2;
+        mFoxyMoveTimer = 0.0f;
+        LogDebug("FNAF1: foxy knocked (%d)", mFoxyKnocks);
+        return;
+    }
+
+    StartJumpscare("foxy");
+}
+
 void FnafGame::SetLight(bool left, bool on)
 {
     Door& door = mDoors[left ? 0 : 1];
@@ -803,11 +928,23 @@ std::string FnafGame::GetCameraImage(Room camera) const
         if (chica) return "cam1a_no_bonnie";
         return "cam1a_freddy";
     case Room::DiningArea:   return bonnie ? "cam1b_bonnie" : (chica ? "cam1b_chica" : "cam1b_empty");
-    case Room::PirateCove:   return "cam1c";
+    case Room::PirateCove:
+    {
+        char name[16];
+        snprintf(name, sizeof(name), "cam1c_%d", glm::clamp(mFoxyStage, 0, 3));
+        return name;
+    }
     case Room::Backstage:    return bonnie ? "cam5_bonnie" : "cam5_empty";
     case Room::Restrooms:    return chica ? "cam7_chica" : "cam7_empty";
     case Room::Kitchen:      return "";
-    case Room::WestHall:     return bonnie ? "cam2a_bonnie" : "cam2a_empty";
+    case Room::WestHall:
+        if (mFoxyRunning)
+        {
+            char name[24];
+            snprintf(name, sizeof(name), "foxyrun_%02d", glm::clamp(mFoxyRunFrame, 0, glm::max(0, mCounts.at("foxyrun") - 1)));
+            return name;
+        }
+        return bonnie ? "cam2a_bonnie" : "cam2a_empty";
     case Room::SupplyCloset: return bonnie ? "cam3_bonnie" : "cam3_empty";
     case Room::WestCorner:   return bonnie ? "cam2b_bonnie" : "cam2b_empty";
     case Room::EastHall:     return chica ? "cam4a_chica" : "cam4a_empty";
@@ -858,7 +995,7 @@ void FnafGame::UpdateView(float deltaTime)
         door.mQuad->SetTexture(door.mFrames[frame].Get());
         door.mQuad->SetRect(kDoorX[side] * scale - panX, 0.0f, kDoorWidth[side] * scale, mScreenHeight);
 
-        door.mButton->SetTexture(mButtons[door.mClosed ? 1 : 0][door.mLight ? 1 : 0].Get());
+        door.mButton->SetTexture(mButtons[side][door.mClosed ? 1 : 0][door.mLight ? 1 : 0].Get());
         door.mButton->SetRect(kButtonX[side] * scale - panX, kButtonY[side] * scale, kButtonWidth * scale, kButtonHeight * scale);
         door.mButton->SetVisible(mState != State::PowerOut);
     }
@@ -879,12 +1016,18 @@ void FnafGame::UpdateView(float deltaTime)
     const std::string cameraImage = cameraOn ? GetCameraImage(room) : "";
 
     mCamera->SetVisible(cameraOn && !cameraImage.empty());
+    mCameraBlack->SetVisible(cameraOn && cameraImage.empty());
     if (cameraOn && !cameraImage.empty())
     {
         if (cameraImage != mCameraShown)
         {
+            // A view change flashes static, except between frames of Foxy's run.
+            const bool runFrame = cameraImage.compare(0, 7, "foxyrun") == 0 && mCameraShown.compare(0, 7, "foxyrun") == 0;
             ShowImage(mCameraCanvas, cameraImage, mCameraShown);
-            mStaticTimer = glm::max(mStaticTimer, 0.1f);
+            if (!runFrame)
+            {
+                mStaticTimer = glm::max(mStaticTimer, 0.1f);
+            }
         }
 
         // The camera slowly pans back and forth.

@@ -104,6 +104,8 @@ private:
     void UpdateHud();
 
     void MoveAnimatronic(Animatronic& a);
+    void UpdateFoxy(float deltaTime);
+    void FoxyArrive();
     void StartJumpscare(const std::string& who);
     void SetLight(bool left, bool on);
     void ShowMessage(const std::string& message);
@@ -123,7 +125,7 @@ private:
     std::unordered_map<std::string, AssetRef> mSounds;
     std::vector<Sprite> mFlipFrames;
     std::vector<Sprite> mFanFrames;
-    Sprite mButtons[2][2];      // [doorClosed][lightOn]
+    Sprite mButtons[2][2][2];   // [side][doorClosed][lightOn]
 
     std::vector<LoadJob> mLoadJobs;
     size_t mLoadNext = 0;
@@ -142,6 +144,7 @@ private:
     Quad* mFan = nullptr;
     Quad* mFlip = nullptr;
     Quad* mCamera = nullptr;
+    Quad* mCameraBlack = nullptr;
     Quad* mStatic = nullptr;
     Quad* mJump = nullptr;
     Text* mTimeText = nullptr;
@@ -162,6 +165,16 @@ private:
     Door mDoors[2];             // [0] left, [1] right
     Animatronic mBonnie;
     Animatronic mChica;
+
+    // Foxy: Pirate Cove stage 0 (curtains closed) .. 3 (gone), then runs to the left door.
+    int32_t mFoxyStage = 0;
+    float mFoxyMoveTimer = 0.0f;
+    float mFoxyLockTimer = 0.0f;    // can't move for a while after the cameras were up
+    float mFoxyRunTimer = 0.0f;     // time left before he arrives once out of the cove
+    bool mFoxyRunning = false;      // the West Hall run is playing
+    int32_t mFoxyRunFrame = 0;
+    float mFoxyRunFrameTimer = 0.0f;
+    int32_t mFoxyKnocks = 0;
     float mNightTime = 0.0f;
     int32_t mHour = 0;
     float mPower = 100.0f;
