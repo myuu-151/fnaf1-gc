@@ -85,15 +85,9 @@ MENU_TEXT = {
     "newgame": ("M0004", 814, 886, 202, 33),
     "continue": ("M0004", 813, 848, 204, 34),
     "arrows": ("M0004", 944, 923, 54, 26),      # >>
-    "clock": ("M0005", 7, 726, 224, 31),        # 12:00 AM
-    "first": ("M0005", 471, 792, 72, 31),       # 1st
-    "night": ("M0005", 572, 792, 125, 31),      # Night
     "copyright": ("M0002", 794, 1000, 224, 14), # (c)2014 Scott Cawthon
-    "gameover": ("M0004", 224, 972, 206, 34),   # Game Over
-    # 6 AM screen ("next day" frame): the 5 scrolls up out of view and the 6 in, next to "AM"
-    "six_5": ("M0003", 406, 608, 53, 72),
-    "six_6": ("M0003", 463, 608, 53, 72),
-    "six_am": ("M0001", 884, 602, 113, 72),
+    # (The night intro's "12:00 AM / 1st Night", the 6 AM clock and "Game Over" are drawn with the
+    # game's own text instead of these pictures.)
 }
 MENU_SCALE = (640 / 1280.0, 480 / 720.0)
 
@@ -336,6 +330,52 @@ def build_golden():
     print("golden freddy: %dx%d" % size)
 
 
+def build_map():
+    # The tablet's map overlay ("Active 9"): a 400x400 picture drawn at (848, 313) on the original's
+    # 1280x720 screen. It blinks between the plain floor plan and one with camera cones; the green
+    # dot on the camera you're watching is drawn by the game.
+    for name, atlas, x, y in (("map_plain", "M0013", 2, 2), ("map_cones", "M0003", 2, 527)):
+        im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + 400, y + 400))
+        save_rgx(im.resize((200, 200), Image.LANCZOS), name)
+    print("map: 2 sprites at 200x200")
+
+    # Camera buttons on the map: one 60x40 picture for all of them, dark grey normally and green
+    # for the camera being watched (they blink between the two).
+    for name, atlas, x, y in (("map_btn_on", "M0001", 477, 835), ("map_btn_off", "M0005", 431, 827)):
+        im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + 60, y + 40))
+        save_rgx(im.resize((32, 20), Image.LANCZOS), name)
+    print("map buttons: 2 sprites at 32x20")
+
+    # The camera name next to each button (31x25 each), in the game's camera order.
+    for name, x, y in (("1a", 580, 928), ("1b", 661, 930), ("1c", 731, 936), ("5", 448, 933),
+                       ("7", 696, 936), ("6", 378, 935), ("2a", 615, 931), ("3", 510, 928),
+                       ("2b", 378, 906), ("4a", 545, 928), ("4b", 413, 933)):
+        im = Image.open(os.path.join(SRC, "M0005.png")).convert("RGBA").crop((x, y, x + 31, y + 25))
+        save_rgx(im.resize((16, 12), Image.LANCZOS), "map_lbl_" + name)
+    print("map labels: 11 sprites at 16x12")
+
+    # The blinking red recording dot in the tablet's top-left corner (50x50 at (92, 76)).
+    im = Image.open(os.path.join(SRC, "M0003.png")).convert("RGBA").crop((312, 931, 362, 981))
+    save_rgx(im.resize((24, 24), Image.LANCZOS), "cam_rec")
+    print("recording dot: 1 sprite at 24x24")
+
+    # The tablet bar at the bottom of the office ("flip panel", 600x60 at (554, 668)): the outline
+    # and chevron you raise the cameras with. ("flip up" next to it is the magenta mouse zone.)
+    im = Image.open(os.path.join(SRC, "M0001.png")).convert("RGBA").crop((411, 962, 1011, 1022))
+    save_rgx(im.resize((300, 40), Image.LANCZOS), "flip_bar")
+    print("tablet bar: 1 sprite at 300x40")
+
+    # (The original's camera-name pictures and its "Usage:"/"Power left:" labels aren't used: the
+    # game draws its own text for those, above the map and in the office corner.)
+
+    # The usage meter (counter "usage meter" at (120, 657)): one 103x32 picture per level 1-5.
+    for i, (atlas, x, y) in enumerate((("M0003", 406, 684), ("M0004", 843, 923), ("M0004", 864, 990),
+                                       ("M0005", 904, 762), ("M0005", 899, 726))):
+        im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + 103, y + 32))
+        save_rgx(im.resize((52, 20), Image.LANCZOS), "hud_usage_%d" % (i + 1))
+    print("usage meter: 5 sprites at 52x20")
+
+
 def build_menu_text():
     for name, (atlas, x, y, w, h) in MENU_TEXT.items():
         im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + w, y + h))
@@ -413,6 +453,7 @@ def main():
     counts.update(build_fan())
     build_buttons()
     build_golden()
+    build_map()
     build_menu_text()
     build_sounds(SOUNDS)
     for name, size in build_sounds(STREAMS).items():

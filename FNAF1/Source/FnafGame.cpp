@@ -263,10 +263,8 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_continue.rgx", &mMenuContinueSprite);
     queueSprite("spr/menu_arrows.rgx", &mMenuArrowsSprite);
     queueSprite("spr/menu_copyright.rgx", &mMenuCopyrightSprite);
-    queueSprite("spr/menu_clock.rgx", &mIntroClockSprite);
-    queueSprite("spr/menu_first.rgx", &mIntroFirstSprite);
-    queueSprite("spr/menu_night.rgx", &mIntroNightSprite);
-    queueSprite("spr/menu_gameover.rgx", &mGameOverSprite);
+    // (The night intro, 6 AM clock and game over are drawn with our own text, not the original's
+    // pictures.)
     // Foxy's run (33 frames, ~880 KB at quality 50) stays in RAM: read from the SD while the
     // cameras are up, a frame took 50-117 ms and the run lagged. From RAM every frame is only the
     // ~22 ms decode. Room comes from the engine freeing its boot splash texture (~1.3 MB).
@@ -275,9 +273,27 @@ void FnafGame::QueueLoadJobs()
         snprintf(name, sizeof(name), "foxyrun_%02d", i);
         queueImage(name);
     }
-    queueSprite("spr/menu_six_5.rgx", &mWinFiveSprite);
-    queueSprite("spr/menu_six_6.rgx", &mWinSixSprite);
-    queueSprite("spr/menu_six_am.rgx", &mWinAmSprite);
+    // Tablet map overlay: the floor plan's two blink pictures, the camera button (green when
+    // watched, grey otherwise) and the 11 camera names.
+    queueSprite("spr/map_plain.rgx", &mMapPlainSprite);
+    queueSprite("spr/map_cones.rgx", &mMapConesSprite);
+    queueSprite("spr/map_btn_on.rgx", &mMapButtonOnSprite);
+    queueSprite("spr/map_btn_off.rgx", &mMapButtonOffSprite);
+    for (int32_t i = 0; i < kNumCameras; ++i)
+    {
+        std::string id = kCameras[i].mId;
+        for (char& c : id) { c = (char)tolower((unsigned char)c); }
+        queueSprite("spr/map_lbl_" + id + ".rgx", &mMapLabelSprites[i]);
+    }
+
+    queueSprite("spr/cam_rec.rgx", &mCamRecSprite);
+    queueSprite("spr/flip_bar.rgx", &mFlipBarSprite);
+    for (int32_t i = 0; i < 5; ++i)
+    {
+        char usage[32];
+        snprintf(usage, sizeof(usage), "spr/hud_usage_%d.rgx", i + 1);
+        queueSprite(usage, &mUsageSprites[i]);
+    }
 
     for (int32_t i = 0; i < mCounts["static"]; ++i)
     {
@@ -456,14 +472,50 @@ void FnafGame::BuildUi()
     mStatic->SetTexture(mStaticCanvas.GetTexture());
     mStatic->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
 
-    mCameraText = makeText("CameraName", mScreenWidth - 300.0f, mScreenHeight - 70.0f, 280.0f, 60.0f, 22.0f);
+    // Tablet map, its buttons and names, then the camera-switch flash over everything on the tablet.
+    mMap = mRoot->CreateChild<Quad>("Map");
+    for (int32_t i = 0; i < kNumCameras; ++i)
+    {
+        mMapButtons[i] = mRoot->CreateChild<Quad>("MapButton");
+        mMapLabels[i] = mRoot->CreateChild<Quad>("MapLabel");
+    }
+    for (Quad*& edge : mCamBorder)
+    {
+        edge = mRoot->CreateChild<Quad>("CameraBorder");
+        edge->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        edge->SetVisible(false);
+    }
+    mCamRec = mRoot->CreateChild<Quad>("CameraRec");
+    mCamRec->SetVisible(false);
 
-    mTimeText = makeText("Time", mScreenWidth - 150.0f, 16.0f, 130.0f, 40.0f, 28.0f);
-    mNightText = makeText("Night", mScreenWidth - 150.0f, 50.0f, 130.0f, 30.0f, 18.0f);
+    mFlipBar = mRoot->CreateChild<Quad>("FlipBar");
+    mFlipBar->SetVisible(false);
+
+    mUsageMeter = mRoot->CreateChild<Quad>("UsageMeter");
+    mUsageMeter->SetVisible(false);
+
+    for (Quad*& band : mFlashBands)
+    {
+        band = mRoot->CreateChild<Quad>("CameraFlash");
+        band->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        band->SetVisible(false);
+    }
+
+    // Above the map, where the original puts its camera name (its "location" object at (832, 292)).
+    // Sits above the map, where the original puts its own camera name.
+    mCameraText = makeText("CameraName", mScreenWidth * 0.63f, mScreenHeight * 0.39f, mScreenWidth * 0.36f, 80.0f, 18.0f);
+
+    // The Kitchen's sign: centred near the top, like the original's "audio only" picture at (464, 69).
+    mAudioOnlyText = makeText("AudioOnly", 0.0f, mScreenHeight * 0.10f, mScreenWidth, 60.0f, 20.0f);
+    mAudioOnlyText->SetHorizontalJustification(Justification::Center);
+
+    // Right-aligned, close to the screen's border like the original's clock.
+    mTimeText = makeText("Time", mScreenWidth - 260.0f, 16.0f, 236.0f, 40.0f, 28.0f);
+    mTimeText->SetHorizontalJustification(Justification::Right);
+    mNightText = makeText("Night", mScreenWidth - 260.0f, 50.0f, 236.0f, 30.0f, 18.0f);
+    mNightText->SetHorizontalJustification(Justification::Right);
     mPowerText = makeText("Power", 24.0f, mScreenHeight - 80.0f, 300.0f, 30.0f, 20.0f);
     mUsageText = makeText("Usage", 24.0f, mScreenHeight - 50.0f, 300.0f, 30.0f, 20.0f);
-    mDebugText = makeText("Debug", 16.0f, 12.0f, 460.0f, 24.0f, 14.0f);   // debug: ambience layer and rooms
-
 
     mMessageText = makeText("Message", 0.0f, mScreenHeight * 0.4f, mScreenWidth, 80.0f, 36.0f);
     mMessageText->SetHorizontalJustification(Justification::Center);
@@ -546,7 +598,9 @@ void FnafGame::StartNight()
     mFoxyRunFrameTimer = 0.0f;
     mFoxyKnocks = 0;
     mFoxyAtDoor = false;
-    mRandomForPic = 0;      // the original's counter starts at 0 and is only rolled when the tablet goes down
+    // The original rolls this whenever the cameras go down (#347), which includes the night's first
+    // frame: its counter never stays at 0, and 0 would pass every rare picture's test.
+    mRandomForPic = (rand() % 100) + 1;
 
     mOfficeShown.clear();
     mCameraShown.clear();
@@ -566,6 +620,8 @@ void FnafGame::StartNight()
     // Channel volume 100 (2.4 on the fan's 25 = 0.6 scale), capped at the mixer's 2.0.
     mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 2.0f);
     mCameraFresh = true;
+    mMapBlinkTime = 0.0f;
+    mFlashTime = -1.0f;
     mPotsTimer = 3.0f;
     mPirateSongTimer = 4.0f;
     mCircusTimer = 5.0f;
@@ -1168,6 +1224,7 @@ void FnafGame::UpdateInput(float deltaTime)
                 mStaticTimer = kStaticSeconds;
                 mCameraFresh = true;
                 PlaySound("blip");
+                StartCameraFlash();
                 OctLog("FNAF1: camera %s", kCameras[mCameraIndex].mId);
             }
         }
@@ -1230,6 +1287,7 @@ void FnafGame::RaiseTablet()
     SetLight(false, false);
     mStaticTimer = kStaticSeconds;
     mCameraFresh = true;
+    StartCameraFlash();     // the original's blip flash plays with the first camera too
 }
 
 void FnafGame::LowerTablet()
@@ -1364,6 +1422,7 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         if (cameraOn && room == (Room)mCameraIndex)
         {
             mCameraCutTimer = 5.0f;
+            StartCameraFlash();     // the original flashes the same white bands when someone moves (#195)
             // Random(4) + 1: 1 plays COMPUTER_DIGITAL, 2-4 play garble1-3.
             const int32_t roll = (rand() % 4) + 1;
             static const char* kMoveSounds[] = { "camhum", "garble1", "garble2", "garble3" };
@@ -2143,15 +2202,21 @@ void FnafGame::UpdateView(float deltaTime)
         mCamera->SetRect(-pan, 0.0f, officeWidth, mScreenHeight);
     }
 
+    UpdateTabletUi(deltaTime, cameraOn);
+
+    // Our camera name, where the original draws its own: just above the map.
     mCameraText->SetVisible(cameraOn);
     if (cameraOn)
     {
         char label[96];
-        if (room == Room::Kitchen)
-            snprintf(label, sizeof(label), "CAM %s  %s\n-CAMERA DISABLED-\nAUDIO ONLY", kCameras[mCameraIndex].mId, kCameras[mCameraIndex].mName);
-        else
-            snprintf(label, sizeof(label), "CAM %s  %s", kCameras[mCameraIndex].mId, kCameras[mCameraIndex].mName);
+        snprintf(label, sizeof(label), "CAM %s  %s", kCameras[mCameraIndex].mId, kCameras[mCameraIndex].mName);
         mCameraText->SetText(label);
+    }
+
+    mAudioOnlyText->SetVisible(cameraOn && room == Room::Kitchen);
+    if (mAudioOnlyText->IsVisible())
+    {
+        mAudioOnlyText->SetText("-CAMERA DISABLED-\nAUDIO ONLY");
     }
 
     // Static: a flickering see-through layer over every camera, solid for a moment when the
@@ -2226,15 +2291,27 @@ void FnafGame::BuildMenuUi()
     mMenuContinue = mRoot->CreateChild<Quad>("MenuContinue");
     mMenuArrows = mRoot->CreateChild<Quad>("MenuArrows");
     mMenuCopyright = mRoot->CreateChild<Quad>("MenuCopyright");
-    mIntroClock = mRoot->CreateChild<Quad>("IntroClock");
-    mIntroFirst = mRoot->CreateChild<Quad>("IntroFirst");
-    mIntroNight = mRoot->CreateChild<Quad>("IntroNight");
-    mGameOverText = mRoot->CreateChild<Quad>("GameOverText");
+    // The night intro, the 6 AM clock and the game over label are our own text.
+    auto makeMenuText = [this](const char* name, float size) -> Text*
+    {
+        Text* text = mRoot->CreateChild<Text>(name);
+        text->SetTextSize(size);
+        text->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        text->SetHorizontalJustification(Justification::Center);
+        text->SetVisible(false);
+        return text;
+    };
+    mIntroClockText = makeMenuText("IntroClock", 34.0f);
+    mIntroNightText = makeMenuText("IntroNight", 34.0f);
+    mGameOverLabel = makeMenuText("GameOverLabel", 34.0f);
 
-    // 6 AM screen, in the original's object order: the digits, then the black masks over them.
-    mWinFive = mRoot->CreateChild<Quad>("WinFive");
-    mWinAm = mRoot->CreateChild<Quad>("WinAm");
-    mWinSix = mRoot->CreateChild<Quad>("WinSix");
+    // 6 AM screen: only the digit rolls up behind the black masks; "AM" sits beside it.
+    mWinFiveText = makeMenuText("WinFive", 40.0f);
+    mWinFiveText->SetHorizontalJustification(Justification::Right);
+    mWinSixText = makeMenuText("WinSix", 40.0f);
+    mWinSixText->SetHorizontalJustification(Justification::Right);
+    mWinAmText = makeMenuText("WinAm", 40.0f);
+    mWinAmText->SetHorizontalJustification(Justification::Left);
     mWinMaskBottom = mRoot->CreateChild<Quad>("WinMaskBottom");
     mWinMaskTop = mRoot->CreateChild<Quad>("WinMaskTop");
     for (Quad* mask : { mWinMaskBottom, mWinMaskTop })
@@ -2260,14 +2337,17 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
     {
         quad->SetVisible(menu);
     }
-    for (Quad* quad : { mIntroClock, mIntroFirst, mIntroNight })
+    for (Text* text : { mIntroClockText, mIntroNightText })
     {
-        quad->SetVisible(intro);
+        text->SetVisible(intro);
     }
-    mGameOverText->SetVisible(false);   // shown by UpdateGameOver
-    for (Quad* quad : { mWinFive, mWinSix, mWinAm, mWinMaskTop, mWinMaskBottom })
+    mGameOverLabel->SetVisible(false);      // shown by UpdateGameOver
+    mWinFiveText->SetVisible(false);        // shown by StartWin
+    mWinSixText->SetVisible(false);
+    mWinAmText->SetVisible(false);
+    for (Quad* quad : { mWinMaskTop, mWinMaskBottom })
     {
-        quad->SetVisible(false);        // shown by StartWin
+        quad->SetVisible(false);
     }
 }
 
@@ -2309,16 +2389,11 @@ void FnafGame::StartNightIntro()
     mState = State::NightIntro;
     mMenuTimer = 0.0f;
 
-    // "12:00 AM" centered, "1st Night" centered below it with the words' bottoms lined up.
-    const float firstWidth = mIntroFirstSprite.mWidth * 2.0f;
-    const float nightWidth = mIntroNightSprite.mWidth * 2.0f;
-    const float gap = 20.0f;
-    const float x = 640.0f - (firstWidth + gap + nightWidth) * 0.5f;
-    const float bottom = 400.0f;
-
-    PlaceSprite(mIntroClock, mIntroClockSprite, 640.0f - mIntroClockSprite.mWidth, 290.0f);
-    PlaceSprite(mIntroFirst, mIntroFirstSprite, x, bottom - mIntroFirstSprite.mHeight * 1.5f);
-    PlaceSprite(mIntroNight, mIntroNightSprite, x + firstWidth + gap, bottom - mIntroNightSprite.mHeight * 1.5f);
+    // "12:00 AM" centred, "1st Night" centred below it.
+    mIntroClockText->SetRect(0.0f, mScreenHeight * 0.40f, mScreenWidth, 50.0f);
+    mIntroClockText->SetText("12:00 AM");
+    mIntroNightText->SetRect(0.0f, mScreenHeight * 0.50f, mScreenWidth, 50.0f);
+    mIntroNightText->SetText("1st Night");
     ShowMenuWidgets(false, false, true);
     PlaySound("blip");
 }
@@ -2428,7 +2503,7 @@ void FnafGame::UpdateGameOver(float deltaTime)
         return;
     }
 
-    if (!mGameOverText->IsVisible())
+    if (!mGameOverLabel->IsVisible())
     {
         // The game over screen: Freddy in the backstage room, "Game Over" in the corner.
         mJingle.Stop();
@@ -2437,8 +2512,9 @@ void FnafGame::UpdateGameOver(float deltaTime)
         mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
         mMenuBack->SetVisible(true);
         mMenuStaticQuad->SetVisible(false);     // a clean cut: no static, no sound
-        PlaceSprite(mGameOverText, mGameOverSprite, 1280.0f - mGameOverSprite.mWidth * 2.0f - 60.0f, 640.0f);
-        mGameOverText->SetVisible(true);
+        mGameOverLabel->SetRect(mScreenWidth * 0.45f, mScreenHeight * 0.86f, mScreenWidth * 0.5f, 50.0f);
+        mGameOverLabel->SetText("Game Over");
+        mGameOverLabel->SetVisible(true);
     }
 
     const float shown = mGameOverTimer - kGameOverStaticSeconds;
@@ -2481,15 +2557,24 @@ void FnafGame::StartWin()
     ShowMessage("");
     ShowMenuWidgets(false, false, false);
     mMenuBlack->SetVisible(true);
-    PlaceSprite(mWinAm, mWinAmSprite, 645.0f, 296.0f);
-    const float scaleX = mScreenWidth / 1280.0f;
+    // The masks hide the clock above and below the slot it rolls through. Our text is centred
+    // across the screen, so they span its whole width.
     const float scaleY = mScreenHeight / 720.0f;
-    mWinMaskTop->SetRect(498.0f * scaleX, 169.0f * scaleY, 158.0f * scaleX, 118.0f * scaleY);
-    mWinMaskBottom->SetRect(499.0f * scaleX, 385.0f * scaleY, 158.0f * scaleX, 118.0f * scaleY);
-    for (Quad* quad : { mWinFive, mWinSix, mWinAm, mWinMaskTop, mWinMaskBottom })
-    {
-        quad->SetVisible(true);
-    }
+    mWinMaskTop->SetRect(0.0f, 169.0f * scaleY, mScreenWidth, 118.0f * scaleY);
+    mWinMaskBottom->SetRect(0.0f, 385.0f * scaleY, mScreenWidth, 118.0f * scaleY);
+    // The original's layout: the digit's right edge at x 602, "AM" from x 645, both on its
+    // 1280x720 screen.
+    mWinFiveText->SetText("5");
+    mWinSixText->SetText("6");
+    mWinAmText->SetText("AM");
+    // (Closer than the original's 645: our font is narrower than its pixel digits, so its gap
+    // looked too wide.)
+    mWinAmText->SetRect(618.0f * mScreenWidth / 1280.0f, 296.0f * scaleY, mScreenWidth * 0.3f, 60.0f);
+    mWinFiveText->SetVisible(true);
+    mWinSixText->SetVisible(true);
+    mWinAmText->SetVisible(true);
+    mWinMaskTop->SetVisible(true);
+    mWinMaskBottom->SetVisible(true);
     UpdateWin(0.0f);
 }
 
@@ -2544,11 +2629,176 @@ void FnafGame::UpdateWin(float deltaTime)
 
     // The path moves in whole pixels.
     const float moved = glm::min(kWinScroll, floor(mWinTimer * kWinScrollSpeed));
-    PlaceSprite(mWinFive, mWinFiveSprite, kWinFiveX, kWinFiveY - moved);
-    PlaceSprite(mWinSix, mWinSixSprite, kWinFiveX + kWinSixDx, kWinFiveY - moved + kWinSixDy);
-    for (Quad* quad : { mWinFive, mWinSix, mWinAm })
+    const float scaleY = mScreenHeight / 720.0f;
+    const float digitRight = 602.0f * mScreenWidth / 1280.0f;
+    mWinFiveText->SetRect(0.0f, (kWinFiveY - moved) * scaleY, digitRight, 60.0f);
+    mWinSixText->SetRect(0.0f, (kWinFiveY - moved + kWinSixDy) * scaleY, digitRight, 60.0f);
+    for (Text* text : { mWinFiveText, mWinSixText, mWinAmText })
     {
-        quad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, alpha));
+        text->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, alpha));
+    }
+}
+
+// The tablet's map overlay, from the original's objects: the floor plan ("Active 9") at (848, 313),
+// 400x400 on its 1280x720 screen, blinking between two pictures; a 60x40 button per camera (green
+// while you watch it, blinking, grey otherwise) and its name beside it. Positions below are the
+// objects' top-left corners in the original's screen.
+struct MapCamera
+{
+    float mButtonX, mButtonY;
+    float mLabelX, mLabelY;
+};
+static const MapCamera kMapCameras[kNumCameras] = {
+    { 954.0f, 334.0f, 962.0f, 341.0f },     // 1A Show Stage
+    { 934.0f, 390.0f, 940.0f, 397.0f },     // 1B Dining Area
+    { 902.0f, 468.0f, 909.0f, 475.0f },     // 1C Pirate Cove
+    { 828.0f, 417.0f, 835.0f, 424.0f },     // 5 Backstage
+    { 1166.0f, 418.0f, 1173.0f, 424.0f },   // 7 Restrooms
+    { 1157.0f, 549.0f, 1164.0f, 556.0f },   // 6 Kitchen
+    { 954.0f, 584.0f, 961.0f, 590.0f },     // 2A W. Hall
+    { 870.0f, 566.0f, 878.0f, 574.0f },     // 3 Supply Closet
+    { 954.0f, 624.0f, 961.0f, 630.0f },     // 2B W. Hall Corner
+    { 1060.0f, 585.0f, 1067.0f, 592.0f },   // 4A E. Hall
+    { 1060.0f, 625.0f, 1067.0f, 632.0f },   // 4B E. Hall Corner
+};
+static constexpr float kMapX = 848.0f;
+static constexpr float kMapY = 313.0f;
+static constexpr float kMapSize = 400.0f;
+static constexpr float kMapBlinkSeconds = 1.0f / 1.2f;      // animation speed 2 at 60 fps
+static constexpr float kMapButtonBlinkSeconds = 1.0f / 1.8f; // animation speed 3
+
+// The camera-switch flash ("Active 5"): 9 full-width white bands at speed 70, over the tablet. Rows
+// are in the original's 720-line screen; (0, 0) means no band that frame.
+static constexpr float kFlashFps = 42.0f;
+static constexpr int32_t kFlashFrames = 9;
+static const float kFlashBands[kFlashFrames][2][2] = {
+    { { 0.0f, 720.0f }, { 0.0f, 0.0f } },
+    { { 155.0f, 434.0f }, { 437.0f, 520.0f } },
+    { { 98.0f, 377.0f }, { 569.0f, 653.0f } },
+    { { 119.0f, 202.0f }, { 241.0f, 520.0f } },
+    { { 0.0f, 120.0f }, { 498.0f, 581.0f } },
+    { { 259.0f, 342.0f }, { 380.0f, 659.0f } },
+    { { 529.0f, 613.0f }, { 0.0f, 0.0f } },
+    { { 103.0f, 187.0f }, { 0.0f, 0.0f } },
+    { { 433.0f, 517.0f }, { 0.0f, 0.0f } },
+};
+
+void FnafGame::StartCameraFlash()
+{
+    mFlashTime = 0.0f;
+}
+
+void FnafGame::UpdateTabletUi(float deltaTime, bool cameraOn)
+{
+    const float scaleX = mScreenWidth / 1280.0f;
+    const float scaleY = mScreenHeight / 720.0f;
+
+    mMap->SetVisible(cameraOn && mMapPlainSprite.Get() != nullptr);
+    if (mMap->IsVisible())
+    {
+        mMapBlinkTime += deltaTime;
+        const bool cones = (int32_t)(mMapBlinkTime / kMapBlinkSeconds) % 2 != 0;
+        const Sprite& sprite = (cones && mMapConesSprite.Get() != nullptr) ? mMapConesSprite : mMapPlainSprite;
+        // Drawn at the sprite's own pixel size, so its lines stay crisp instead of being stretched.
+        PlaceSprite(mMap, sprite, kMapX, kMapY);
+    }
+
+    const bool buttonOn = (int32_t)(mMapBlinkTime / kMapButtonBlinkSeconds) % 2 == 0;
+    for (int32_t i = 0; i < kNumCameras; ++i)
+    {
+        const bool watched = (i == mCameraIndex) && buttonOn;
+        const Sprite& sprite = watched ? mMapButtonOnSprite : mMapButtonOffSprite;
+        mMapButtons[i]->SetVisible(cameraOn && sprite.Get() != nullptr);
+        if (mMapButtons[i]->IsVisible())
+        {
+            PlaceSprite(mMapButtons[i], sprite, kMapCameras[i].mButtonX, kMapCameras[i].mButtonY);
+        }
+
+        mMapLabels[i]->SetVisible(cameraOn && mMapLabelSprites[i].Get() != nullptr);
+        if (mMapLabels[i]->IsVisible())
+        {
+            PlaceSprite(mMapLabels[i], mMapLabelSprites[i], kMapCameras[i].mLabelX, kMapCameras[i].mLabelY);
+        }
+    }
+
+    // The tablet bar at the bottom: shown while the power is on, in the office and with the cameras
+    // up (retail shows a bar in both views; the original's own objects for the camera view are
+    // magenta mouse zones, so this reuses the office bar's picture). Hidden during the flip.
+    const bool barOn = mState == State::Playing && mFlipBarSprite.Get() != nullptr &&
+                       (mTabletProgress <= 0.0f || mTabletProgress >= 1.0f);
+    mFlipBar->SetVisible(barOn);
+    if (barOn)
+    {
+        // The original puts it at x 255-855 of its 1280 screen, left of centre. Our view is
+        // narrower (4:3), where that reads as off to one side, so it's centred instead.
+        const float barWidth = 600.0f * scaleX;
+        mFlipBar->SetTexture(mFlipBarSprite.Get());
+        mFlipBar->SetRect((mScreenWidth - barWidth) * 0.5f, 638.0f * scaleY, barWidth, 60.0f * scaleY);
+    }
+
+    // The white frame around the feed (the original's "frame" object: a 2 px rectangle inset 17 px)
+    // and the recording dot, which blinks on and off with the map.
+    const float kBorder[4][4] = {
+        { 17.0f, 16.0f, 1247.0f, 2.0f },        // top
+        { 17.0f, 702.0f, 1247.0f, 2.0f },       // bottom
+        { 17.0f, 16.0f, 2.0f, 688.0f },         // left
+        { 1262.0f, 16.0f, 2.0f, 688.0f },       // right
+    };
+    for (int32_t e = 0; e < 4; ++e)
+    {
+        mCamBorder[e]->SetVisible(cameraOn);
+        if (cameraOn)
+        {
+            mCamBorder[e]->SetRect(kBorder[e][0] * scaleX, kBorder[e][1] * scaleY,
+                                   kBorder[e][2] * scaleX, kBorder[e][3] * scaleY);
+        }
+    }
+
+    // The usage meter uses the original's five coloured pictures, drawn next to our own
+    // "Usage:" text rather than at the original's HUD position.
+    const Sprite& usageSprite = mUsageSprites[glm::clamp(mUsage, 1, 5) - 1];
+    mUsageMeter->SetVisible(mState == State::Playing && usageSprite.Get() != nullptr);
+    if (mUsageMeter->IsVisible())
+    {
+        mUsageMeter->SetTexture(usageSprite.Get());
+        mUsageMeter->SetRect(100.0f, mScreenHeight - 48.0f,
+                             usageSprite.mWidth * mScreenWidth / 640.0f, usageSprite.mHeight * mScreenHeight / 480.0f);
+    }
+
+    const bool recOn = (int32_t)(mMapBlinkTime / kMapBlinkSeconds) % 2 == 0;
+    mCamRec->SetVisible(cameraOn && recOn && mCamRecSprite.Get() != nullptr);
+    if (mCamRec->IsVisible())
+    {
+        mCamRec->SetTexture(mCamRecSprite.Get());
+        mCamRec->SetRect(68.0f * scaleX, 52.0f * scaleY, 50.0f * scaleX, 50.0f * scaleY);
+    }
+
+    // The flash plays over the tablet and stops on its own.
+    int32_t flashFrame = -1;
+    if (mFlashTime >= 0.0f && cameraOn)
+    {
+        mFlashTime += deltaTime;
+        flashFrame = (int32_t)(mFlashTime * kFlashFps);
+        if (flashFrame >= kFlashFrames)
+        {
+            flashFrame = -1;
+            mFlashTime = -1.0f;
+        }
+    }
+    else if (!cameraOn)
+    {
+        mFlashTime = -1.0f;
+    }
+
+    for (int32_t b = 0; b < 2; ++b)
+    {
+        const float top = (flashFrame >= 0) ? kFlashBands[flashFrame][b][0] : 0.0f;
+        const float bottom = (flashFrame >= 0) ? kFlashBands[flashFrame][b][1] : 0.0f;
+        mFlashBands[b]->SetVisible(bottom > top);
+        if (bottom > top)
+        {
+            mFlashBands[b]->SetRect(0.0f, top * scaleY, mScreenWidth, (bottom - top) * scaleY);
+        }
     }
 }
 
@@ -2559,24 +2809,10 @@ void FnafGame::UpdateHud()
     mNightText->SetVisible(playing);
     mPowerText->SetVisible(playing);
     mUsageText->SetVisible(playing && mState != State::PowerOut);
-    mDebugText->SetVisible(mState == State::Playing);
 
     if (!playing)
     {
         return;
-    }
-
-    {
-        // Debug line: which ambience layer is playing, and where Bonnie and Chica are.
-        static const char* kRooms[] = { "Stage", "Dining", "Cove", "Backstage", "Restrooms", "Kitchen",
-                                        "W.Hall", "Closet", "W.Corner", "E.Hall", "E.Corner", "L.Door", "R.Door", "Office" };
-        static const char* kLayers[] = { "dark + eerie 0", "dark + eerie 30", "dark + eerie 50", "dark + eerie 75" };
-        char debug[192];
-        snprintf(debug, sizeof(debug), "Ambience %s | Bonnie %s | Chica %s | Foxy %d | Gold %d | skips %u | free %u KB",
-                 mAmbienceLayer >= 0 ? kLayers[mAmbienceLayer] : "-",
-                 kRooms[(int)mBonnie.mRoom], kRooms[(int)mChica.mRoom], mFoxyStage, mYellowBear,
-                 (unsigned)GetStreamUnderruns(), GetFreeMemoryKb());
-        mDebugText->SetText(debug);
     }
 
     char text[64];
@@ -2586,13 +2822,7 @@ void FnafGame::UpdateHud()
 
     snprintf(text, sizeof(text), "Power left: %d%%", (int)ceil(mPower));
     mPowerText->SetText(text);
-
-    std::string usage = "Usage: ";
-    for (int32_t i = 0; i < mUsage; ++i)
-    {
-        usage += "[] ";
-    }
-    mUsageText->SetText(usage);
+    mUsageText->SetText("Usage:");      // the meter's picture is drawn next to it
 }
 
 void FnafGame::ShowMessage(const std::string& message)

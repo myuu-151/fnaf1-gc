@@ -118,6 +118,8 @@ private:
     void UpdateTablet(float deltaTime);
     void UpdateJumpscare(float deltaTime);
     void UpdateView(float deltaTime);
+    void UpdateTabletUi(float deltaTime, bool cameraOn);
+    void StartCameraFlash();
     void UpdateHud();
 
     void MoveAnimatronic(Animatronic& a);
@@ -176,7 +178,6 @@ private:
     PcmPlayer mRobotVoice;      // under the hallucination flashes (the night's 8th stream)
     float mEerieVolume = 0.0f;
     int32_t mAmbienceLayer = -1;    // how many of Bonnie and Chica are off the stage (eerie ambience level)
-    Text* mDebugText = nullptr;     // debug line: ambience level and rooms
     // The engine runs at most 4 streams: the night has call, ambience, fan and rare music;
     // StopStreams() clears them before the power-out (music box, laugh) and 6 AM (chimes, cheer).
 
@@ -200,12 +201,33 @@ private:
     Quad* mCamera = nullptr;
     Quad* mCameraBlack = nullptr;
     Quad* mStatic = nullptr;
+    // Tablet map overlay: the floor plan (blinking between two pictures), a green dot on the camera
+    // being watched, and the white bands of the camera-switch flash.
+    Quad* mMap = nullptr;
+    Quad* mMapButtons[11] = {};
+    Quad* mMapLabels[11] = {};
+    Quad* mFlashBands[2] = {};
+    Quad* mCamBorder[4] = {};   // the white frame around the camera feed
+    Quad* mCamRec = nullptr;    // blinking red recording dot
+    Sprite mCamRecSprite;
+    Quad* mFlipBar = nullptr;   // the tablet bar at the bottom of the office
+    Sprite mFlipBarSprite;
+    Quad* mUsageMeter = nullptr;        // the original's 5 usage pictures, one per level
+    Sprite mUsageSprites[5];
+    Sprite mMapPlainSprite;
+    Sprite mMapConesSprite;
+    Sprite mMapButtonOnSprite;
+    Sprite mMapButtonOffSprite;
+    Sprite mMapLabelSprites[11];
+    float mMapBlinkTime = 0.0f;
+    float mFlashTime = -1.0f;       // < 0 = no flash playing
     Quad* mJump = nullptr;
     Text* mTimeText = nullptr;
     Text* mNightText = nullptr;
     Text* mPowerText = nullptr;
     Text* mUsageText = nullptr;
     Text* mCameraText = nullptr;
+    Text* mAudioOnlyText = nullptr;     // the Kitchen's sign, centred near the top as in the original
     Text* mMessageText = nullptr;
     Quad* mLoadBack = nullptr;
     Quad* mLoadBarBack = nullptr;
@@ -221,23 +243,18 @@ private:
     Quad* mMenuContinue = nullptr;
     Quad* mMenuArrows = nullptr;
     Quad* mMenuCopyright = nullptr;
-    Quad* mIntroClock = nullptr;
-    Quad* mIntroFirst = nullptr;
-    Quad* mIntroNight = nullptr;
+    Text* mIntroClockText = nullptr;    // "12:00 AM" and "1st Night"
+    Text* mIntroNightText = nullptr;
     Sprite mMenuTitleSprite;
     Sprite mMenuNewGameSprite;
     Sprite mMenuContinueSprite;
     Sprite mMenuArrowsSprite;
     Sprite mMenuCopyrightSprite;
-    Sprite mIntroClockSprite;
-    Sprite mIntroFirstSprite;
-    Sprite mIntroNightSprite;
     std::string mMenuShown;
     int32_t mMenuSelection = 0;         // 0 = New Game, 1 = Continue
     float mMenuTimer = 0.0f;
     float mMenuFrameTimer = 0.0f;
-    Quad* mGameOverText = nullptr;
-    Sprite mGameOverSprite;
+    Text* mGameOverLabel = nullptr;
     float mGameOverTimer = 0.0f;
     float mScreenWidth = 640.0f;
     float mScreenHeight = 480.0f;
@@ -280,14 +297,11 @@ private:
     float mWinTimer = 0.0f;         // running time (the frame's events are paused during its fades)
     bool mWinCheered = false;       // the 5 has stopped: kids cheering, and the 201-frame countdown runs
     float mWinCheerTime = 0.0f;
-    Quad* mWinFive = nullptr;
-    Quad* mWinSix = nullptr;
-    Quad* mWinAm = nullptr;
+    Text* mWinFiveText = nullptr;   // the digit rolls from 5 to 6; "AM" stays put
+    Text* mWinSixText = nullptr;
+    Text* mWinAmText = nullptr;
     Quad* mWinMaskTop = nullptr;
     Quad* mWinMaskBottom = nullptr;
-    Sprite mWinFiveSprite;
-    Sprite mWinSixSprite;
-    Sprite mWinAmSprite;
     bool mLaughed = false;          // Freddy's laugh during the power-out
     float mCameraPanTime = 0.0f;
     float mFlickerTimer = 0.0f;
