@@ -154,6 +154,10 @@ STREAMS = {
 # and crashed hardware right away (the phone call), while mono streams are stable.
 STEREO_SOUNDS = set()
 
+# Sample gain for sounds that need to be louder than the mixer's maximum volume (2.0). Empty:
+# the original recordings' levels are right.
+SOUND_GAIN = {}
+
 
 def src_png(number):
     return os.path.join(SRC, "%04d.png" % number)
@@ -344,6 +348,9 @@ def build_sounds(table):
         cmd = [FFMPEG, "-v", "error", "-y", "-i", src, "-ac", channels, "-ar", "22050"]
         if max_seconds:
             cmd += ["-t", str(max_seconds)]
+        if name in SOUND_GAIN:
+            # Louder than the mixer's maximum allows: boost the samples, with a limiter against clipping.
+            cmd += ["-af", "volume=%.2f,alimiter=limit=0.95" % SOUND_GAIN[name]]
         cmd += ["-f", "s16le", dst]
         subprocess.run(cmd, check=True)
         if name in LOOP_CROSSFADE:

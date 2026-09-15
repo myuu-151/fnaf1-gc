@@ -496,7 +496,8 @@ void FnafGame::StartNight()
     mEerieVolume = 0.0f;
     mAmbienceLayer = -1;
     mEerie.Start("snd/eerie.pcm", (uint32_t)mCounts["size_eerie"], true, 0.0f);
-    mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 1.0f);
+    // Channel volume 100 (2.4 on the fan's 25 = 0.6 scale), capped at the mixer's 2.0.
+    mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 2.0f);
     mCameraFresh = true;
     mPotsTimer = 3.0f;
     mPirateSongTimer = 4.0f;
@@ -996,7 +997,7 @@ void FnafGame::UpdateInput(float deltaTime)
             // its own channel and turns the fan's channel down (to 10, from 25).
             mTapeSound.Start("snd/minidv.pcm", (uint32_t)mCounts["size_minidv"], false, 1.0f);
             mFanSound.SetVolume(0.24f);
-            mCall.SetVolume(0.5f);          // the call's channel goes from 100 to 50 with the cameras up
+            mCall.SetVolume(1.0f);          // the call's channel goes from 100 to 50 with the cameras up
             SetLight(true, false);
             SetLight(false, false);
             mStaticTimer = kStaticSeconds;
@@ -1077,7 +1078,7 @@ void FnafGame::LowerTablet()
     PlaySound("tablet");
     mTapeSound.Stop();              // the original mutes its channel when the cameras close
     mFanSound.SetVolume(0.6f);
-    mCall.SetVolume(1.0f);
+    mCall.SetVolume(2.0f);
     mRandomForPic = (rand() % 100) + 1;   // the original re-rolls "random for pic" as the tablet goes down
 }
 
