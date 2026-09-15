@@ -106,7 +106,8 @@ SOUNDS = {
     "windowscare": (31, None),
     "steps": (9, None),          # deep steps
     "run": (55, None),           # running fast3
-    "knock": (39, None),         # DOOR_POUNDING_ME: Foxy banging on the left door
+    "knock": (39, None),         # DOOR_POUNDING_ME: the faint random knock (channel volume 10)
+    "foxybang": (27, None),      # knock2: Foxy banging on the closed left door (loud)
     "honk": (36, None),          # PartyFavorraspyPart_AC01__3: Freddy poster's nose
     "camup": (6, None),          # CAMERA_VIDEO_LOA (raising the tablet)
     "camhum": (8, None),         # COMPUTER_DIGITAL (monitor hum while it's up)

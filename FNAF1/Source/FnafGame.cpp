@@ -85,7 +85,7 @@ static const CameraInfo kCameras[kNumCameras] = {
 };
 
 static const char* kSoundNames[] = {
-    "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "run", "knock", "honk",
+    "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "run", "knock", "foxybang", "honk",
     "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3", "pots4", "error",
 };
 
@@ -124,6 +124,11 @@ bool FnafGame::Initialize()
     BuildUi();
     BuildMenuUi();
     BuildLoadingUi();
+
+    // The jumpscare is created last so it draws in front of everything (child order is draw order).
+    mJump = mRoot->CreateChild<Quad>("Jumpscare");
+    mJump->SetTexture(mJumpCanvas.GetTexture());
+    mJump->SetVisible(false);
 
     mState = State::Loading;
     OctLog("FNAF1: loading %u files", (unsigned)mLoadJobs.size());
@@ -364,9 +369,6 @@ void FnafGame::BuildUi()
     mUsageText = makeText("Usage", 24.0f, mScreenHeight - 50.0f, 300.0f, 30.0f, 20.0f);
     mDebugText = makeText("Debug", 16.0f, 12.0f, 460.0f, 24.0f, 14.0f);   // debug: ambience layer and rooms
 
-    mJump = mRoot->CreateChild<Quad>("Jumpscare");
-    mJump->SetTexture(mJumpCanvas.GetTexture());
-    mJump->SetVisible(false);
 
     mMessageText = makeText("Message", 0.0f, mScreenHeight * 0.4f, mScreenWidth, 80.0f, 36.0f);
     mMessageText->SetHorizontalJustification(Justification::Center);
@@ -1235,8 +1237,9 @@ void FnafGame::FoxyArrive()
 
     if (mDoors[0].mClosed)
     {
-        // Bangs on the door, drains power (more each time), and goes back to the cove.
-        PlaySound("knock");
+        // Bangs on the door (the original's knock2, much louder than the random knock), drains
+        // power (more each time), and goes back to the cove.
+        PlaySound("foxybang", false, 1.0f);
         mPower = glm::max(0.0f, mPower - (1.0f + 5.0f * mFoxyKnocks));
         mFoxyKnocks++;
         mFoxyStage = rand() % 2;
@@ -1282,6 +1285,7 @@ void FnafGame::StartJumpscare(const std::string& who)
     mState = State::Jumpscare;
     mTabletUp = false;
     mTabletProgress = 0.0f;
+    mOfficePan = 0.5f;      // face the middle of the office, where the lunge happens
     mJumpWho = who;
     mJumpFrame = 0;
     mJumpTimer = 0.0f;
@@ -1562,7 +1566,10 @@ void FnafGame::UpdateView(float deltaTime)
         }
         else
         {
-            mJump->SetRect(-panX, 0.0f, officeWidth, mScreenHeight);
+            // The frames are office-wide with the lunge in the middle: always draw them centered,
+            // whatever the pan, so the jumpscare never happens off-screen.
+            const float centerPanX = 0.5f * glm::max(0.0f, officeWidth - mScreenWidth);
+            mJump->SetRect(-centerPanX, 0.0f, officeWidth, mScreenHeight);
         }
     }
 }
