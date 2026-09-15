@@ -158,8 +158,8 @@ private:
     PcmPlayer mEerie;           // eerie ambience, louder as the animatronics get close
     PcmPlayer mBreath;          // breathing when someone gets into the office
     float mEerieVolume = 0.0f;
-    float mAmbienceVolume = 0.0f;
-    int32_t mAmbienceTrack = 0;     // what mAmbience plays: 0 = dark ambience (idle), 1 = ambience2 (close)
+    int32_t mAmbienceLayer = -1;    // how many of Bonnie and Chica are off the stage (eerie ambience level)
+    Text* mDebugText = nullptr;     // debug line: ambience level and rooms
     // The engine runs at most 4 streams: the night has call, ambience, fan and rare music;
     // StopStreams() clears them before the power-out (music box, laugh) and 6 AM (chimes, cheer).
 
@@ -255,6 +255,8 @@ private:
     float mPotsTimer = 0.0f;        // Chica rattling pots in the kitchen
     float mPirateSongTimer = 0.0f;  // rolls for Foxy's pirate song every 4 s
     float mCircusTimer = 0.0f;      // rolls for the circus tune every 5 s
+    float mPoundingTimer = 0.0f;    // rolls for door pounding every 10 s
+    float mGroanTimer = 0.0f;       // rolls for a groan every 5 s while someone is in the office
     float mCheerTimer = 0.0f;       // kids cheering after the 6 AM chimes
     bool mLaughed = false;          // Freddy's laugh during the power-out
     float mCameraPanTime = 0.0f;
@@ -268,7 +270,9 @@ private:
     float mPowerOutRollTimer = 0.0f;
     float mFreddyFlickerTimer = 0.0f;
     bool mFreddyFaceOn = false;
-    float mStaticAlpha = 0.35f;     // camera static opacity between switch bursts
+    int32_t mStaticLevel = 0;       // camera static: re-rolled 0-2 every second
+    float mStaticLevelTimer = 0.0f;
+    float mCameraCutTimer = 0.0f;   // feed cut to static after someone moved on the watched camera
     std::string mJumpWho;
     int32_t mJumpFrame = 0;
     float mJumpTimer = 0.0f;

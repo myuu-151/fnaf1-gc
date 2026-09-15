@@ -116,6 +116,7 @@ SOUNDS = {
     "pots1": (16, None),         # OVEN-DRA: Chica in the kitchen
     "pots2": (17, None),
     "pots3": (19, None),
+    "pots4": (18, None),         # OVEN-DRA_7 (the original's 5 kitchen actions use it twice)
     "error": (4, None),          # error: door/light buttons while someone is in the office
 }
 

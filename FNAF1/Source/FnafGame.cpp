@@ -78,15 +78,15 @@ static const CameraInfo kCameras[kNumCameras] = {
     { "7", "Restrooms" },
     { "6", "Kitchen" },
     { "2A", "W. Hall" },
+    { "3", "Supply Closet" },       // same order as the Room enum (was swapped with 2B)
     { "2B", "W. Hall Corner" },
-    { "3", "Supply Closet" },
     { "4A", "E. Hall" },
     { "4B", "E. Hall Corner" },
 };
 
 static const char* kSoundNames[] = {
     "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "run", "knock", "honk",
-    "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3", "error",
+    "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3", "pots4", "error",
 };
 
 // SD diagnostic log (Octave System_Dolphin.cpp; writes /octiso.log when the local logger is enabled).
@@ -362,6 +362,7 @@ void FnafGame::BuildUi()
     mNightText = makeText("Night", mScreenWidth - 150.0f, 50.0f, 130.0f, 30.0f, 18.0f);
     mPowerText = makeText("Power", 24.0f, mScreenHeight - 80.0f, 300.0f, 30.0f, 20.0f);
     mUsageText = makeText("Usage", 24.0f, mScreenHeight - 50.0f, 300.0f, 30.0f, 20.0f);
+    mDebugText = makeText("Debug", 16.0f, 12.0f, 460.0f, 24.0f, 14.0f);   // debug: ambience layer and rooms
 
     mJump = mRoot->CreateChild<Quad>("Jumpscare");
     mJump->SetTexture(mJumpCanvas.GetTexture());
@@ -449,20 +450,22 @@ void FnafGame::StartNight()
 
     mFanSound.Start("snd/fan.pcm", (uint32_t)mCounts["size_fan"], true, 0.6f);
 
-    // The original starts the dark ambience looping with the fan. (Its robotvoice sound also
-    // starts there, but it's heard only when the animatronics glitch on the cameras.)
-    mAmbience.Start("snd/darkambience.pcm", (uint32_t)mCounts["size_darkambience"], true, 0.5f);   // channel volume 50
-
-    // Eerie ambience loops from the start too, silent until the animatronics close in.
-    mAmbienceVolume = 0.5f;
-    mAmbienceTrack = 0;
+    // As in the original, both ambience loops start with the night and are never restarted
+    // (so their full tracks play); only the eerie one's volume changes. The dark ambience is
+    // its channel 2 at volume 50, the eerie ambience channel 18 starting at 0. (Its robotvoice
+    // loop also starts here, but is heard only when the animatronics glitch on the cameras.)
+    mAmbience.Start("snd/darkambience.pcm", (uint32_t)mCounts["size_darkambience"], true, 1.5f);
     mEerieVolume = 0.0f;
+    mAmbienceLayer = -1;
     mEerie.Start("snd/eerie.pcm", (uint32_t)mCounts["size_eerie"], true, 0.0f);
     mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 1.0f);
     mCameraFresh = true;
     mPotsTimer = 3.0f;
     mPirateSongTimer = 4.0f;
     mCircusTimer = 5.0f;
+    mPoundingTimer = 10.0f;
+    mGroanTimer = 5.0f;
+    mCameraCutTimer = 0.0f;
     mCheerTimer = 0.0f;
     mLaughed = false;
 }
@@ -598,7 +601,19 @@ void FnafGame::UpdatePlaying(float deltaTime)
         return;
     }
 
-    // Debug keys: X = power out, Y = Bonnie's jumpscare, D-pad down = Chica's.
+    // Debug keys: X = power out, Y = Bonnie's jumpscare, D-pad down = Chica's,
+    // D-pad up = Bonnie and Chica at the doors.
+    if (Pressed(GAMEPAD_UP))
+    {
+        for (Animatronic* a : { &mBonnie, &mChica })
+        {
+            a->mRoom = a->mLeftSide ? Room::LeftDoor : Room::RightDoor;
+            a->mSeenAtDoor = false;
+            a->mMoveTimer = 0.0f;
+            a->mOfficeTimer = 0.0f;
+        }
+        OctLog("FNAF1: debug: Bonnie and Chica at the doors");
+    }
     if (Pressed(GAMEPAD_X))
     {
         StartPowerOut();
@@ -625,21 +640,61 @@ void FnafGame::UpdatePlaying(float deltaTime)
         return;
     }
 
-    // Chica in the kitchen rattles pots and pans; loud when you're on CAM 6.
+    // Chica in the kitchen: every 4 s, a 50% chance of one of the original's 5 kitchen sounds
+    // (4 files, one used twice); loud when you're on CAM 6.
     if (mChica.mRoom == Room::Kitchen)
     {
         mPotsTimer -= deltaTime;
         if (mPotsTimer <= 0.0f)
         {
-            static const char* kPots[] = { "pots1", "pots2", "pots3" };
-            const bool watchingKitchen = mTabletUp && (Room)mCameraIndex == Room::Kitchen;
-            PlaySound(kPots[rand() % 3], false, watchingKitchen ? 0.9f : 0.25f);
-            mPotsTimer = 5.0f + (rand() % 400) / 100.0f;
+            mPotsTimer += 4.0f;
+            if ((rand() % 2) == 0)
+            {
+                static const char* kPots[] = { "pots1", "pots2", "pots3", "pots4", "pots4" };
+                const bool watchingKitchen = mTabletUp && (Room)mCameraIndex == Room::Kitchen;
+                PlaySound(kPots[rand() % 5], false, watchingKitchen ? 0.9f : 0.25f);
+            }
         }
     }
     else
     {
-        mPotsTimer = 1.0f;
+        mPotsTimer = 4.0f;
+    }
+
+    // Every 10 s, a 1/50 chance of a faint door pounding (the original plays it on a channel at
+    // volume 10), so it can happen right at the start of the night.
+    mPoundingTimer -= deltaTime;
+    if (mPoundingTimer <= 0.0f)
+    {
+        mPoundingTimer += 10.0f;
+        if ((rand() % 50) == 0)
+        {
+            PlaySound("knock", false, 0.15f);
+        }
+    }
+
+    // Every 5 s while Bonnie or Chica is in the office ("got you"), a 1/3 chance of one of
+    // the 4 groaning sounds.
+    if (IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office))
+    {
+        mGroanTimer -= deltaTime;
+        if (mGroanTimer <= 0.0f)
+        {
+            mGroanTimer += 5.0f;
+            if ((rand() % 3) == 0 && !mBreath.IsPlaying())
+            {
+                const int32_t groan = (rand() % 4) + 1;
+                char path[32];
+                char key[32];
+                snprintf(path, sizeof(path), "snd/breath%d.pcm", groan);
+                snprintf(key, sizeof(key), "size_breath%d", groan);
+                mBreath.Start(path, (uint32_t)mCounts[key], false, 0.8f);
+            }
+        }
+    }
+    else
+    {
+        mGroanTimer = 5.0f;
     }
 
     // Rare music, as in the original's events: "every 4 s, Random(30) = 1" plays Foxy's
@@ -649,7 +704,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
     if (mPirateSongTimer <= 0.0f)
     {
         mPirateSongTimer += 4.0f;
-        if (mFoxyStage < 3 && (rand() % 30) == 0 && !mRareMusic.IsPlaying())
+        if (mFoxyStage == 0 && !mFoxyRunning && (rand() % 30) == 0 && !mRareMusic.IsPlaying())   // only while Foxy has no progress
         {
             mRareMusicVolume = GetPirateSongVolume();
             mRareMusic.Start("snd/piratesong.pcm", (uint32_t)mCounts["size_piratesong"], false, mRareMusicVolume);
@@ -679,54 +734,31 @@ void FnafGame::UpdatePlaying(float deltaTime)
         }
     }
 
-    // Ambience in three layers:
-    //   idle   - every animatronic in place (Bonnie and Chica on the stage, Foxy behind the
-    //            curtain): the dark ambience
-    //   moving - someone has left, but isn't near: the eerie ambience
-    //   close  - someone in a hall, corner, doorway or the office, or Foxy out of the cove:
-    //            ambience2
-    // The dark ambience and ambience2 share one stream (the original plays them on one channel).
-    auto isClose = [](const Animatronic& a)
-    {
-        switch (a.mRoom)
-        {
-        case Room::WestHall:
-        case Room::EastHall:
-        case Room::WestCorner:
-        case Room::EastCorner:
-        case Room::LeftDoor:
-        case Room::RightDoor:
-        case Room::Office:       return true;
-        default:                 return false;
-        }
-    };
-    const bool anyActive = mBonnie.mRoom != Room::ShowStage || mChica.mRoom != Room::ShowStage ||
-                           mFoxyStage > 0 || mFoxyRunning;
-    const bool anyClose = isClose(mBonnie) || isClose(mChica) || mFoxyStage >= 2 || mFoxyRunning;
+    // Eerie ambience: its volume follows how much danger you're in. Each of these adds a step:
+    // Bonnie on CAM 3, 2A or 2B, at the door or inside; Chica on CAM 4A or 4B, at the door or
+    // inside; Foxy out from behind the curtain. None = silent, one = 30, two = 50, three = 75
+    // (Freddy in the room would be 100; he doesn't roam here yet). The dark ambience keeps
+    // playing underneath. Channel volumes map to stream volume so the dark ambience's 50 is
+    // 1.5 (1.0 is the mixer's middle level, 2.0 its maximum).
+    const bool bonnieDanger = mBonnie.mRoom == Room::SupplyCloset || mBonnie.mRoom == Room::WestHall ||
+                              mBonnie.mRoom == Room::WestCorner || mBonnie.mRoom == Room::LeftDoor ||
+                              mBonnie.mRoom == Room::Office;
+    const bool chicaDanger = mChica.mRoom == Room::EastHall || mChica.mRoom == Room::EastCorner ||
+                             mChica.mRoom == Room::RightDoor || mChica.mRoom == Room::Office;
+    const bool foxyDanger = mFoxyStage >= 2 || mFoxyRunning;
+    const int32_t danger = (bonnieDanger ? 1 : 0) + (chicaDanger ? 1 : 0) + (foxyDanger ? 1 : 0);
+    static constexpr int32_t kEerieChannelVolume[] = { 0, 30, 50, 75 };
+    const float eerieVolume = glm::min(2.0f, kEerieChannelVolume[danger] * 0.03f);
 
-    const int32_t track = anyClose ? 1 : 0;     // 0 = dark ambience, 1 = ambience2
-    if (track != mAmbienceTrack)
+    if (danger != mAmbienceLayer)
     {
-        mAmbienceTrack = track;
-        mAmbienceVolume = -1.0f;                // set below
-        if (track == 1)
-            mAmbience.Start("snd/ambience.pcm", (uint32_t)mCounts["size_ambience"], true, 0.0f);
-        else
-            mAmbience.Start("snd/darkambience.pcm", (uint32_t)mCounts["size_darkambience"], true, 0.0f);
+        OctLog("FNAF1: eerie ambience -> channel volume %d (danger %d)", kEerieChannelVolume[danger], danger);
+        mAmbienceLayer = danger;
     }
-
-    const float ambienceVolume = anyClose ? 0.6f : (anyActive ? 0.0f : 0.5f);
-    const float eerieVolume = (anyActive && !anyClose) ? 0.5f : 0.0f;
-
     if (eerieVolume != mEerieVolume)
     {
         mEerieVolume = eerieVolume;
         mEerie.SetVolume(eerieVolume);
-    }
-    if (ambienceVolume != mAmbienceVolume)
-    {
-        mAmbienceVolume = ambienceVolume;
-        mAmbience.SetVolume(ambienceVolume);
     }
 
     // Power: each thing in use adds a bar.
@@ -765,7 +797,7 @@ void FnafGame::StartPowerOut()
     mJingle.Start("snd/powerdown.pcm", (uint32_t)mCounts["size_powerdown"], false, 1.0f);
 
     // The original switches its ambience channel to ambience2 (volume 50) when the power runs out.
-    mAmbience.Start("snd/ambience.pcm", (uint32_t)mCounts["size_ambience"], true, 0.5f);
+    mAmbience.Start("snd/ambience.pcm", (uint32_t)mCounts["size_ambience"], true, 2.0f);   // a quiet recording
     if (doorWasClosed)
     {
         PlaySound("door");
@@ -1084,6 +1116,22 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
     {
         a.mSeenAtDoor = false;
         a.mOfficeTimer = 0.0f;
+
+        // Moving on the camera you're watching cuts that feed to static for 5 s (the original
+        // counts 300 frames at 60 fps with the picture hidden) and rolls a garble:
+        // Random(4) + 1, where 2-4 play one of the three and 1 plays nothing.
+        const bool cameraOn = mTabletUp && mTabletProgress >= 1.0f;
+        const Room watched = (Room)mCameraIndex;
+        if (cameraOn && (before == watched || a.mRoom == watched))
+        {
+            mCameraCutTimer = 5.0f;
+            const int32_t roll = (rand() % 4) + 1;
+            if (roll >= 2)
+            {
+                static const char* kGarbles[] = { "garble1", "garble2", "garble3" };
+                PlaySound(kGarbles[roll - 2], false, 0.7f);
+            }
+        }
         // Footsteps as they close in, louder the nearer they get (the original plays its
         // "deep steps" at 10-40% depending on where they are).
         float steps = 0.0f;
@@ -1101,17 +1149,6 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         if (steps > 0.0f)
         {
             PlaySound("steps", false, steps);
-        }
-
-        // They're in: one of the original's four breathing sounds.
-        if (a.mRoom == Room::Office)
-        {
-            const int32_t breath = (rand() % 4) + 1;
-            char path[32];
-            char key[32];
-            snprintf(path, sizeof(path), "snd/breath%d.pcm", breath);
-            snprintf(key, sizeof(key), "size_breath%d", breath);
-            mBreath.Start(path, (uint32_t)mCounts[key], false, 0.8f);
         }
         LogDebug("FNAF1: %s moved to room %d", a.mName, (int)a.mRoom);
     }
@@ -1442,27 +1479,20 @@ void FnafGame::UpdateView(float deltaTime)
     const Room room = (Room)mCameraIndex;
     const std::string cameraImage = cameraOn ? GetCameraImage(room) : "";
 
-    mCamera->SetVisible(cameraOn && !cameraImage.empty());
+    if (mCameraCutTimer > 0.0f)
+    {
+        mCameraCutTimer -= deltaTime;
+    }
+    // While the feed is cut after someone moved, only the static shows.
+    mCamera->SetVisible(cameraOn && !cameraImage.empty() && mCameraCutTimer <= 0.0f);
     // Black for the audio-only Kitchen camera, and for the pitch-black end of a power-out.
     mCameraBlack->SetVisible((cameraOn && cameraImage.empty()) || (mState == State::PowerOut && mPowerOutPhase == 2));
     if (cameraOn && !cameraImage.empty())
     {
         if (cameraImage != mCameraShown)
         {
-            // A view change flashes static, except between frames of Foxy's run.
-            const bool runFrame = cameraImage.compare(0, 7, "foxyrun") == 0 && mCameraShown.compare(0, 7, "foxyrun") == 0;
+            // (Movement on this camera is handled in MoveAnimatronic: the feed cuts to static.)
             ShowImage(mCameraCanvas, cameraImage, mCameraShown);
-            if (!runFrame)
-            {
-                mStaticTimer = glm::max(mStaticTimer, 0.1f);
-
-                // Someone moved on the camera you're watching: the feed garbles.
-                if (!mCameraFresh)
-                {
-                    static const char* kGarbles[] = { "garble1", "garble2", "garble3" };
-                    PlaySound(kGarbles[rand() % 3], false, 0.7f);
-                }
-            }
         }
         mCameraFresh = false;
 
@@ -1506,9 +1536,20 @@ void FnafGame::UpdateView(float deltaTime)
             snprintf(name, sizeof(name), "static_%02d", mStaticFrame);
             std::string unused;
             ShowImage(mStaticCanvas, name, unused);
-            mStaticAlpha = 0.25f + (rand() % 26) / 100.0f;
         }
-        mStatic->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, mStaticTimer > 0.0f ? 1.0f : mStaticAlpha));
+
+        // The original's static: every frame its blend coefficient (0 opaque .. 255 invisible)
+        // is 150 + Random(50) + level * 15, with level re-rolled to 0-2 every second. That's
+        // roughly 10-41% opaque. It's solid for the switch burst and while the feed is cut.
+        mStaticLevelTimer -= deltaTime;
+        if (mStaticLevelTimer <= 0.0f)
+        {
+            mStaticLevelTimer += 1.0f;
+            mStaticLevel = rand() % 3;
+        }
+        const float coefficient = 150.0f + (float)(rand() % 50) + mStaticLevel * 15.0f;
+        const float alpha = (mStaticTimer > 0.0f || mCameraCutTimer > 0.0f) ? 1.0f : 1.0f - coefficient / 255.0f;
+        mStatic->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, alpha));
     }
 
     // Jumpscare: centered on the current view.
@@ -1763,10 +1804,23 @@ void FnafGame::UpdateHud()
     mNightText->SetVisible(playing);
     mPowerText->SetVisible(playing);
     mUsageText->SetVisible(playing && mState != State::PowerOut);
+    mDebugText->SetVisible(mState == State::Playing);
 
     if (!playing)
     {
         return;
+    }
+
+    {
+        // Debug line: which ambience layer is playing, and where Bonnie and Chica are.
+        static const char* kRooms[] = { "Stage", "Dining", "Cove", "Backstage", "Restrooms", "Kitchen",
+                                        "W.Hall", "Closet", "W.Corner", "E.Hall", "E.Corner", "L.Door", "R.Door", "Office" };
+        static const char* kLayers[] = { "dark + eerie 0", "dark + eerie 30", "dark + eerie 50", "dark + eerie 75" };
+        char debug[128];
+        snprintf(debug, sizeof(debug), "Ambience %s | Bonnie %s | Chica %s | Foxy %d",
+                 mAmbienceLayer >= 0 ? kLayers[mAmbienceLayer] : "-",
+                 kRooms[(int)mBonnie.mRoom], kRooms[(int)mChica.mRoom], mFoxyStage);
+        mDebugText->SetText(debug);
     }
 
     char text[64];

@@ -67,6 +67,7 @@ Booting just the DOL with loose files on the SD isn't supported. Without the ISO
 | X | Debug: power out now |
 | Y | Debug: Bonnie's jumpscare |
 | D-pad down | Debug: Chica's jumpscare |
+| D-pad up | Debug: put Bonnie and Chica at the doors |
 
 ## What the prototype has
 
