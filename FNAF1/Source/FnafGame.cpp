@@ -734,7 +734,8 @@ void FnafGame::UpdatePlaying(float deltaTime)
         mFoxyRunTimer = 0.0f;
         mFoxyRunFrame = 0;
         mFoxyRunFrameTimer = 0.0f;
-        PlaySound("run");
+        StartAnimPreload("foxyrun", mCounts["foxyrun"], 0);
+        PlaySound("run", false, 2.0f);
         OctLog("FNAF1: debug: foxy runs");
     }
     sCStickDownHeld = cStickDown;
@@ -1445,7 +1446,7 @@ void FnafGame::UpdateFoxy(float deltaTime)
         {
             // Bangs on the door (knock2, much louder than the random knock), drains 10 + 50 x bangs
             // of the original's 999 power (1%, 6%, 11%, ...) and goes back to curtain stage 0 or 1.
-            PlaySound("foxybang", false, 1.0f);
+            PlaySound("foxybang", false, 2.0f);
             mPower = glm::max(0.0f, mPower - (1.0f + 5.0f * mFoxyKnocks));
             mFoxyKnocks++;
             mFoxyStage = rand() % 2;
@@ -1471,6 +1472,7 @@ void FnafGame::UpdateFoxy(float deltaTime)
         if (mFoxyRunTimer >= kFoxyRunSeconds)
         {
             LogAnimStats("foxy run");
+            AnimPreloadStop();
             FoxyArrive();
         }
         return;
@@ -1518,7 +1520,8 @@ void FnafGame::UpdateFoxy(float deltaTime)
         mFoxyRunTimer = 0.0f;
         mFoxyRunFrame = 0;
         mFoxyRunFrameTimer = 0.0f;
-        PlaySound("run");
+        StartAnimPreload("foxyrun", mCounts["foxyrun"], 0);
+        PlaySound("run", false, 2.0f);
         return;
     }
 
@@ -1591,6 +1594,7 @@ void FnafGame::StartJumpscare(const std::string& who)
     snprintf(name, sizeof(name), "jump_%s_00", who.c_str());
     std::string shown;
     ShowImage(mJumpCanvas, name, shown);
+    StartAnimPreload("jump_" + who, mCounts["jump_" + who], 1);
     mMenuShown.clear();
     mJump->SetVisible(true);
 }
@@ -1623,6 +1627,7 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     {
         // Game over: full-screen static with its sound, then the game over screen.
         LogAnimStats(("jumpscare " + mJumpWho).c_str());
+        AnimPreloadStop();
         mJump->SetVisible(false);
         AudioManager::StopAllSounds();      // the scream ends with the animation
         mState = State::GameOver;
@@ -1875,14 +1880,12 @@ std::string FnafGame::GetCameraImage(Room camera) const
         if (mFoxyRunning)
         {
             char name[24];
-            // After the last frame the original's run animation loops its last two frames
-            // (the empty hall at the end) until he reaches the door.
+            // After the last frame the original's run animation loops its last two frames (the
+            // empty hall at the end) until he reaches the door. Those two pictures differ only by
+            // compression noise (mean 0.6 of 255), so this holds the last one: flipping between
+            // them cost a backwards seek on the SD every frame.
             const int32_t runFrames = glm::max(1, mCounts.at("foxyrun"));
-            int32_t frame = mFoxyRunFrame;
-            if (frame >= runFrames)
-            {
-                frame = (runFrames >= 2) ? runFrames - 2 + ((frame - runFrames) % 2) : runFrames - 1;
-            }
+            const int32_t frame = glm::min(mFoxyRunFrame, runFrames - 1);
             snprintf(name, sizeof(name), "foxyrun_%02d", frame);
             return name;
         }
@@ -1913,6 +1916,19 @@ std::string FnafGame::GetCameraImage(Room camera) const
     }
 }
 
+void FnafGame::StartAnimPreload(const std::string& prefix, int32_t count, size_t first)
+{
+    StartReaderThread();
+    std::vector<std::string> paths;
+    char name[64];
+    for (int32_t i = 0; i < count; ++i)
+    {
+        snprintf(name, sizeof(name), "img/%s_%02d.jpg", prefix.c_str(), i);
+        paths.push_back(name);
+    }
+    AnimPreloadStart(paths, first);
+}
+
 void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string& shown)
 {
     if (name == shown)
@@ -1933,8 +1949,9 @@ void FnafGame::ShowImage(YuvCanvas& canvas, const std::string& name, std::string
     // Backgrounds and animation frames (jumpscares, Foxy's run) are read from the disc when shown.
     const bool animation = name.compare(0, 5, "jump_") == 0 || name.compare(0, 8, "foxyrun_") == 0;
     const uint64_t startUs = SYS_GetTimeMicroseconds();
-    const bool read = animation ? ReadAnimationFrame("img/" + name + ".jpg", mFrameBuffer)
-                                : ReadDataFile("img/" + name + ".jpg", mFrameBuffer);
+    const std::string path = "img/" + name + ".jpg";
+    const bool read = animation ? (AnimPreloadTake(path, mFrameBuffer) || ReadAnimationFrame(path, mFrameBuffer))
+                                : ReadDataFile(path, mFrameBuffer);
     const uint64_t readUs = SYS_GetTimeMicroseconds();
     if (read && canvas.Show(mFrameBuffer))
     {

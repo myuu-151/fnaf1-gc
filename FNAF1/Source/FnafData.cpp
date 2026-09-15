@@ -367,6 +367,150 @@ bool ReadAnimationFrame(const std::string& relPath, std::vector<uint8_t>& out)
 static MutexObject* sStreamMutex = nullptr;
 static std::vector<PcmPlayer*> sStreamPlayers;
 
+// Animation read-ahead: while a jumpscare or Foxy's run plays, the reader thread keeps the next
+// few frames read, so the main thread only decodes (on hardware a frame read was 20-40 ms on top
+// of a 25-30 ms decode). Slot buffers keep their capacity, so frames don't churn the heap.
+static constexpr size_t kAnimAhead = 4;
+struct AnimSlot
+{
+    size_t mIndex = 0;
+    bool mReady = false;
+    std::vector<uint8_t> mData;
+};
+static MutexObject* sAnimMutex = nullptr;
+static std::vector<std::string> sAnimPaths;
+static AnimSlot sAnimSlots[kAnimAhead];
+static size_t sAnimNext = 0;            // next frame for the reader
+static uint32_t sAnimGeneration = 0;    // bumped by start/stop, so a read in flight is dropped
+
+static bool AnimReaderStep()
+{
+    if (sAnimMutex == nullptr)
+    {
+        return false;
+    }
+
+    SYS_LockMutex(sAnimMutex);
+    int32_t freeSlot = -1;
+    for (size_t i = 0; i < kAnimAhead; ++i)
+    {
+        if (!sAnimSlots[i].mReady)
+        {
+            freeSlot = int32_t(i);
+            break;
+        }
+    }
+    if (freeSlot < 0 || sAnimNext >= sAnimPaths.size())
+    {
+        SYS_UnlockMutex(sAnimMutex);
+        return false;
+    }
+
+    const size_t index = sAnimNext;
+    const std::string path = sAnimPaths[index];
+    const uint32_t generation = sAnimGeneration;
+    std::vector<uint8_t> data;
+    data.swap(sAnimSlots[freeSlot].mData);  // read into the slot's buffer (not ready, so nobody takes it)
+    SYS_UnlockMutex(sAnimMutex);
+
+    const bool ok = ReadAnimationFrame(path, data);
+
+    SYS_LockMutex(sAnimMutex);
+    AnimSlot& slot = sAnimSlots[freeSlot];
+    slot.mData.swap(data);
+    if (generation == sAnimGeneration && index == sAnimNext)
+    {
+        slot.mIndex = index;
+        slot.mReady = ok;
+        sAnimNext = ok ? index + 1 : sAnimPaths.size();
+    }
+    SYS_UnlockMutex(sAnimMutex);
+    return true;
+}
+
+void AnimPreloadStart(const std::vector<std::string>& relPaths, size_t first)
+{
+    if (sAnimMutex == nullptr)
+    {
+        return;
+    }
+
+    SYS_LockMutex(sAnimMutex);
+    sAnimPaths = relPaths;
+    sAnimNext = first;
+    sAnimGeneration++;
+    for (AnimSlot& slot : sAnimSlots)
+    {
+        slot.mReady = false;
+    }
+    SYS_UnlockMutex(sAnimMutex);
+}
+
+void AnimPreloadStop()
+{
+    if (sAnimMutex == nullptr)
+    {
+        return;
+    }
+
+    SYS_LockMutex(sAnimMutex);
+    sAnimPaths.clear();
+    sAnimNext = 0;
+    sAnimGeneration++;
+    for (AnimSlot& slot : sAnimSlots)
+    {
+        slot.mReady = false;
+        std::vector<uint8_t>().swap(slot.mData);    // give the memory back
+    }
+    SYS_UnlockMutex(sAnimMutex);
+}
+
+bool AnimPreloadTake(const std::string& relPath, std::vector<uint8_t>& out)
+{
+    if (sAnimMutex == nullptr)
+    {
+        return false;
+    }
+
+    SYS_LockMutex(sAnimMutex);
+    bool found = false;
+    for (size_t index = 0; index < sAnimPaths.size(); ++index)
+    {
+        if (sAnimPaths[index] != relPath)
+        {
+            continue;
+        }
+
+        for (AnimSlot& slot : sAnimSlots)
+        {
+            if (!slot.mReady)
+            {
+                continue;
+            }
+            if (slot.mIndex == index)
+            {
+                out.swap(slot.mData);
+                slot.mReady = false;
+                found = true;
+            }
+            else if (slot.mIndex < index)
+            {
+                slot.mReady = false;    // skipped past it
+            }
+        }
+        // The reader carries on after this frame (if the main thread had to read it itself, the
+        // reader's copy in flight is dropped).
+        if (sAnimNext <= index)
+        {
+            sAnimNext = index + 1;
+            sAnimGeneration++;
+        }
+        break;
+    }
+    SYS_UnlockMutex(sAnimMutex);
+    return found;
+}
+
 static ThreadFuncRet StreamReaderMain(void* arg)
 {
     // Below the main thread (priority 64), like VideoStream: reads run while it waits for vsync.
@@ -385,6 +529,8 @@ static ThreadFuncRet StreamReaderMain(void* arg)
         }
         SYS_UnlockMutex(sStreamMutex);
 
+        worked = AnimReaderStep() || worked;
+
         if (!worked)
         {
             SYS_Sleep(2);
@@ -392,6 +538,22 @@ static ThreadFuncRet StreamReaderMain(void* arg)
     }
 
     THREAD_RETURN();
+}
+
+void StartReaderThread()
+{
+    if (sStreamMutex != nullptr)
+    {
+        return;
+    }
+
+    sStreamMutex = SYS_CreateMutex();
+    sAnimMutex = SYS_CreateMutex();
+    // Created directly for a bigger stack: SYS_CreateThread gives 16 KB, and on hardware the
+    // reader hung at the same read every time (fread -> libfat -> SD driver, plus logging),
+    // which looks like a stack overflow corrupting memory.
+    static lwp_t sReaderThread = LWP_THREAD_NULL;
+    LWP_CreateThread(&sReaderThread, StreamReaderMain, nullptr, nullptr, 64 * 1024, 40);
 }
 
 bool PcmPlayer::ReaderStep()
@@ -499,15 +661,7 @@ bool PcmPlayer::Start(const std::string& relPath, uint32_t sizeBytes, bool loop,
     mReady.resize(kStreamChunkBytes * mChannels);
     mReadyBytes = 0;
 
-    if (sStreamMutex == nullptr)
-    {
-        sStreamMutex = SYS_CreateMutex();
-        // Created directly for a bigger stack: SYS_CreateThread gives 16 KB, and on hardware the
-        // reader hung at the same read every time (fread -> libfat -> SD driver, plus logging),
-        // which looks like a stack overflow corrupting memory.
-        static lwp_t sReaderThread = LWP_THREAD_NULL;
-        LWP_CreateThread(&sReaderThread, StreamReaderMain, nullptr, nullptr, 64 * 1024, 40);
-    }
+    StartReaderThread();
 
     SYS_LockMutex(sStreamMutex);
     sStreamPlayers.push_back(this);

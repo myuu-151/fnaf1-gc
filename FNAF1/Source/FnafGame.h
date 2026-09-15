@@ -143,6 +143,7 @@ private:
     float GetPirateSongVolume() const;
     std::string GetOfficeImage() const;
     void ShowImage(YuvCanvas& canvas, const std::string& name, std::string& shown);
+    void StartAnimPreload(const std::string& prefix, int32_t count, size_t first);
 
     void PlaySound(const char* name, bool loop = false, float volume = 1.0f);
     void StopSound(const char* name);

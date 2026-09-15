@@ -18,6 +18,15 @@ bool ReadDataFile(const std::string& relPath, std::vector<uint8_t>& out);
 // consecutive frames read straight on instead of seeking. Falls back to ReadDataFile.
 bool ReadAnimationFrame(const std::string& relPath, std::vector<uint8_t>& out);
 
+// Starts the background reader thread (streams and animation read-ahead) if it isn't running.
+void StartReaderThread();
+
+// Animation read-ahead on the reader thread: frames relPaths[first..] are read a few ahead.
+// Take() hands over a frame if it's ready (swapping it into out); otherwise read it yourself.
+void AnimPreloadStart(const std::vector<std::string>& relPaths, size_t first);
+void AnimPreloadStop();
+bool AnimPreloadTake(const std::string& relPath, std::vector<uint8_t>& out);
+
 // A YUV texture that shows one background at a time. Backgrounds stay in RAM as
 // JPEG bytes and are decoded straight into the texture's planes when shown.
 class YuvCanvas
