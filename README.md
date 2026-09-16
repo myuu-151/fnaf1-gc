@@ -1,3 +1,5 @@
+![Five Nights at Freddy's](docs/banner.png)
+
 # FNAF1 for GameCube
 
 A reimplementation of Five Nights at Freddy's (all credit to Scott Cawthon) for the Nintendo GameCube, built on the [Octave](https://github.com/myuu-151/Octave-libogc) engine.
