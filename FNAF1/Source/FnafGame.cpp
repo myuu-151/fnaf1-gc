@@ -47,13 +47,50 @@ static constexpr float kJumpFrameSeconds = 1.0f / 24.0f;
 static constexpr float kFanFrameSeconds = 1.0f / 30.0f;
 static constexpr uint64_t kLoadBudgetUs = 30000;  // loading work per frame
 
-// Prototype difficulty: a bit above the original Night 1 so things happen.
-// Night 1 activity levels, as in the original: everyone starts at 0 (nobody moves) and gains 1 at
-// 2 AM (Bonnie), 3 AM and 4 AM (Bonnie, Chica, Foxy). A move happens when Random(20) + 1 is at or
-// below the level.
-static constexpr int32_t kBonnieBaseAi = 0;
-static constexpr int32_t kChicaBaseAi = 0;
-static constexpr int32_t kFoxyBaseAi = 0;
+// Activity levels, straight from the original's events (#304-#309): each night sets everyone's
+// level at the start, and nobody's rises with the hour except through the bumps below. A move
+// happens when Random(20) + 1 is at or below the level.
+//
+// Freddy's is rolled once per night: night 4 is 1 + Random(2), nights 5 and 6 are 2 and 3 + the
+// same roll, so he varies between runs of the same night.
+struct NightActivity
+{
+    int32_t mBonnie;
+    int32_t mChica;
+    int32_t mFoxy;
+    int32_t mFreddy;        // his base
+    int32_t mFreddyRandom;  // plus Random(mFreddyRandom): 1 means a fixed level
+};
+static constexpr NightActivity kNightActivity[7] =
+{
+    {  0,  0, 0, 0, 1 },    // (night 0: unused)
+    {  0,  0, 0, 0, 1 },    // night 1: nobody moves until the hourly bumps
+    {  3,  1, 1, 0, 1 },    // night 2
+    {  0,  5, 2, 1, 1 },    // night 3
+    {  2,  4, 6, 1, 2 },    // night 4
+    {  5,  7, 5, 2, 2 },    // night 5
+    { 10, 12, 6, 3, 2 },    // night 6
+};
+
+// The hourly bumps (#334-#336): Bonnie gains one at 2 AM, and Bonnie, Chica and Foxy each gain one
+// at 3 AM and again at 4 AM. Freddy never gains any.
+static const NightActivity& GetNightActivity(int32_t night)
+{
+    return kNightActivity[glm::clamp(night, 0, 6)];
+}
+
+// Extra power drain per night (#341-#344): one percent every 6 s on night 2, 5 s on night 3,
+// 4 s on night 4 and 3 s from night 5, on top of what's switched on. Night 1 has none.
+static float GetExtraDrainInterval(int32_t night)
+{
+    switch (night)
+    {
+    case 2:  return 6.0f;
+    case 3:  return 5.0f;
+    case 4:  return 4.0f;
+    default: return (night >= 5) ? 3.0f : 0.0f;
+    }
+}
 
 // Rare camera pictures (the original rolls a "random for pic" counter): Freddy staring on
 // the Show Stage, and rare posters on empty cameras. Rolled when the tablet goes up or the
@@ -149,7 +186,7 @@ static const CameraInfo kCameras[kNumCameras] = {
 static const char* kSoundNames[] = {
     "light", "door", "blip", "tablet", "scream", "windowscare", "steps", "run", "knock", "foxybang", "honk",
     "camup", "camhum", "garble1", "garble2", "garble3", "pots1", "pots2", "pots3", "pots4", "error",
-    "giggle",
+    "giggle", "freddysteps",
 };
 
 // Golden Freddy in the office: image 573's top-left in the 1600x720 office, and its size.
@@ -589,6 +626,22 @@ void FnafGame::StartNight()
         a->mTabletUpInside = 0.0f;
     }
 
+    // Freddy starts on the stage with the others. His level is rolled once for the night.
+    mFreddy = Animatronic();
+    mFreddy.mName = "freddyoffice";
+    mFreddy.mLeftSide = false;
+    mFreddy.mMoveInterval = 3.02f;      // his move roll, the original's 3020 ms
+    const NightActivity& activity = GetNightActivity(mNight);
+    mFreddyActivity = activity.mFreddy + (activity.mFreddyRandom > 1 ? rand() % activity.mFreddyRandom : 0);
+    mFreddyWait = 0.0f;
+    mFreddyReady = false;
+    mFreddyPending = false;
+    mFreddyWasInKitchen = false;
+    mFreddyInOffice = false;
+    mFreddyKillTimer = 0.0f;
+    mFreddyMusicTimer = 0.0f;
+    mPowerDrainTimer = 0.0f;
+
     mFoxyStage = 0;
     mFoxyMoveTimer = 0.0f;
     mFoxyLockTimer = 0.0f;
@@ -617,8 +670,18 @@ void FnafGame::StartNight()
     mEerieVolume = 0.0f;
     mAmbienceLayer = -1;
     mEerie.Start("snd/eerie.pcm", (uint32_t)mCounts["size_eerie"], true, 0.0f);
-    // Channel volume 100 (2.4 on the fan's 25 = 0.6 scale), capped at the mixer's 2.0.
-    mCall.Start("snd/call.pcm", (uint32_t)mCounts["size_call"], false, 2.0f);
+    // Channel volume 100 (2.4 on the fan's 25 = 0.6 scale), capped at the mixer's 2.0. Nights 1-5
+    // each have their own call (#361-#365); night 6 has none.
+    // Each call plays once per game, not once per attempt: the original's "play voice N" counters
+    // are only cleared by New Game, so dying and continuing gives you the night in silence.
+    const char* call = (mNight >= 1 && mNight <= 6 && !mCallPlayed[mNight]) ? GetCallFile() : nullptr;
+    if (call != nullptr)
+    {
+        mCallPlayed[mNight] = true;
+        char sizeKey[24];
+        snprintf(sizeKey, sizeof(sizeKey), "size_%s", call);
+        mCall.Start((std::string("snd/") + call + ".pcm").c_str(), (uint32_t)mCounts[sizeKey], false, 2.0f);
+    }
     mCameraFresh = true;
     mMapBlinkTime = 0.0f;
     mFlashTime = -1.0f;
@@ -728,7 +791,7 @@ void FnafGame::Update(float deltaTime)
     deltaTime = glm::min(deltaTime, 0.1f);
 
     // Crash breadcrumb: every state change goes to the log.
-    static const char* kStateNames[] = { "Loading", "Menu", "Newspaper", "NightIntro", "Playing", "PowerOut", "Jumpscare", "GameOver", "Win", "CreepyEnd" };
+    static const char* kStateNames[] = { "Loading", "Menu", "Newspaper", "NightIntro", "Playing", "PowerOut", "Jumpscare", "GameOver", "Win", "CreepyEnd", "Ending" };
     static int32_t sLoggedState = -1;
     if ((int32_t)mState != sLoggedState)
     {
@@ -757,6 +820,10 @@ void FnafGame::Update(float deltaTime)
 
     case State::Win:
         UpdateWin(deltaTime);
+        break;
+
+    case State::Ending:
+        UpdateEnding(deltaTime);
         break;
 
     case State::Menu:
@@ -895,6 +962,11 @@ void FnafGame::UpdatePlaying(float deltaTime)
     UpdateInput(deltaTime);
     UpdateTablet(deltaTime);
     UpdateAnimatronics(deltaTime);
+    UpdateFreddy(deltaTime);
+    if (mState != State::Playing)
+    {
+        return;     // he took you
+    }
     UpdateFoxy(deltaTime);
 
     if (mState != State::Playing)
@@ -974,11 +1046,20 @@ void FnafGame::UpdateRandomSounds(float deltaTime)
     // Rare music, as in the original's events: "every 4 s, Random(30) = 1" plays Foxy's
     // pirate song, and "every 5 s, Random(30) = 1" plays the faint circus tune. The pirate
     // song event also checks a counter we haven't mapped; here it needs Foxy in the cove.
-    mPirateSongTimer -= deltaTime;
+    // #268 tests "fox progress = 0" before its timer, so the 4 s only accumulates while he is
+    // still behind the curtain; leaving the cove doesn't bank rolls for when he returns.
+    if (mFoxyStage == 0 && !mFoxyRunning)
+    {
+        mPirateSongTimer -= deltaTime;
+    }
+    else
+    {
+        mPirateSongTimer = 4.0f;
+    }
     if (mPirateSongTimer <= 0.0f)
     {
         mPirateSongTimer += 4.0f;
-        if (mFoxyStage == 0 && !mFoxyRunning && (rand() % 30) == 0 && !mRareMusic.IsPlaying())   // only while Foxy has no progress
+        if ((rand() % 30) == 0 && !mRareMusic.IsPlaying())
         {
             mRareMusicVolume = GetPirateSongVolume();
             mRareMusic.Start("snd/piratesong.pcm", (uint32_t)mCounts["size_piratesong"], false, mRareMusicVolume);
@@ -1026,7 +1107,9 @@ void FnafGame::UpdateEerieAndPower(float deltaTime)
     const bool foxyDanger = mFoxyStage >= 2 || mFoxyRunning;
     const int32_t danger = (bonnieDanger ? 1 : 0) + (chicaDanger ? 1 : 0) + (foxyDanger ? 1 : 0);
     static constexpr int32_t kEerieChannelVolume[] = { 0, 30, 50, 75 };
-    const float eerieVolume = glm::min(2.0f, kEerieChannelVolume[danger] * 0.03f);
+    // Freddy in the office drowns out the rest of it (#358).
+    const int32_t channelVolume = mFreddyInOffice ? 100 : kEerieChannelVolume[danger];
+    const float eerieVolume = glm::min(2.0f, channelVolume * 0.03f);
 
     if (danger != mAmbienceLayer)
     {
@@ -1050,6 +1133,21 @@ void FnafGame::UpdateEerieAndPower(float deltaTime)
     mUsage += mTabletUp ? 1 : 0;
 
     mPower -= deltaTime * 0.1f * mUsage;
+
+    // From night 2 the night itself eats power on a timer, whatever you have switched on.
+    const float drainInterval = GetExtraDrainInterval(mNight);
+    if (drainInterval > 0.0f)
+    {
+        mPowerDrainTimer += deltaTime;
+        while (mPowerDrainTimer >= drainInterval)
+        {
+            mPowerDrainTimer -= drainInterval;
+            // The original's power counter runs 0..999 and is shown as counter/10 (#174, #175),
+            // so its "subtract 1" here is a tenth of a percent, not a whole one.
+            mPower -= 0.1f;
+        }
+    }
+
     if (mPower <= 0.0f)
     {
         StartPowerOut();
@@ -1240,8 +1338,7 @@ void FnafGame::UpdateInput(float deltaTime)
                 mCameraIndex = (mCameraIndex + step + kNumCameras) % kNumCameras;
                 mStaticTimer = kStaticSeconds;
                 mCameraFresh = true;
-                PlaySound("blip");
-                StartCameraFlash();
+                StartCameraFlash();     // plays the blip with it
                 OctLog("FNAF1: camera %s", kCameras[mCameraIndex].mId);
             }
         }
@@ -1251,22 +1348,18 @@ void FnafGame::UpdateInput(float deltaTime)
     // Doors: L / R. Lights: D-pad left / right.
     for (int32_t side = 0; side < 2; ++side)
     {
-        // Foxy at an open left door: the original hides that door's buttons.
-        if (side == 0 && mFoxyAtDoor && !mDoors[0].mClosed)
-        {
-            continue;
-        }
-
+        // (Foxy at the left door hides the door's *graphic* in the original (#327), not its button:
+        // #95 and #101 have no condition on his progress, so the slam stays possible.)
         const bool doorPressed = Pressed(side == 0 ? GAMEPAD_L1 : GAMEPAD_R1);
         const bool lightPressed = Pressed(side == 0 ? GAMEPAD_LEFT : GAMEPAD_RIGHT);
 
-        // Bonnie inside kills the left side's buttons and Chica the right's: they just buzz.
-        if (IsAt(side == 0 ? mBonnie : mChica, Room::Office))
+        // Bonnie inside kills that side's light and stops you *shutting* the door (#95, #99 guard
+        // on her; #96, #100 buzz instead). Opening it again is allowed: #101 and #103 carry no
+        // such condition, so you can stop the drain while you wait her out.
+        const bool inside = IsAt(side == 0 ? mBonnie : mChica, Room::Office);
+        if (inside && (lightPressed || (doorPressed && !mDoors[side].mClosed)))
         {
-            if (doorPressed || lightPressed)
-            {
-                PlaySound("error");
-            }
+            PlaySound("error");
             continue;
         }
 
@@ -1354,11 +1447,12 @@ void FnafGame::UpdateTablet(float deltaTime)
 
 int32_t FnafGame::GetAi(const Animatronic& a) const
 {
-    // Like the original: the AI level goes up at set hours.
+    // The night's level, plus the hourly bumps.
+    const NightActivity& night = GetNightActivity(mNight);
     if (&a == &mBonnie)
-        return kBonnieBaseAi + (mHour >= 2) + (mHour >= 3) + (mHour >= 4);
+        return night.mBonnie + (mHour >= 2) + (mHour >= 3) + (mHour >= 4);
 
-    return kChicaBaseAi + (mHour >= 3) + (mHour >= 4);
+    return night.mChica + (mHour >= 3) + (mHour >= 4);
 }
 
 bool FnafGame::IsAt(const Animatronic& a, Room room) const
@@ -1423,6 +1517,202 @@ void FnafGame::UpdateAnimatronics(float deltaTime)
     }
 }
 
+const char* FnafGame::GetCallFile() const
+{
+    // One recording per night (#361-#365). Night 6 has none.
+    switch (mNight)
+    {
+    case 1:  return "call";
+    case 2:  return "call2";
+    case 3:  return "call3";
+    case 4:  return "call4";
+    case 5:  return "call5";
+    default: return nullptr;
+    }
+}
+
+void FnafGame::UpdateFreddy(float deltaTime)
+{
+    // "viewing" in the original: non-zero while the tablet is up.
+    const bool watching = mTabletUp;
+
+    if (mFreddyInOffice)
+    {
+        // He stands in the dark corner whispering (#404). Every second there's a one-in-four
+        // chance he takes you (#405), but only with the cameras down, and not while Foxy is
+        // already at the door.
+        mFreddyKillTimer += deltaTime;
+        if (mFreddyKillTimer >= 1.0f)
+        {
+            mFreddyKillTimer -= 1.0f;
+            if (!watching && !mFoxyAtDoor && (rand() % 4) == 1)
+            {
+                SetLight(true, false);
+                SetLight(false, false);
+                StartJumpscare("freddyoffice");
+            }
+        }
+        return;
+    }
+
+    // The move roll (#189): every 3.02 s, Random(20) + 1 against his level, with the cameras down.
+    mFreddy.mMoveTimer += deltaTime;
+    if (mFreddy.mMoveTimer >= mFreddy.mMoveInterval)
+    {
+        mFreddy.mMoveTimer -= mFreddy.mMoveInterval;
+        if (!watching && (rand() % 20) + 1 <= mFreddyActivity)
+        {
+            mFreddyReady = true;
+        }
+    }
+
+    // Once the roll comes up he counts down before moving (#396, #397): 1000 frames at level 0
+    // down to 400 at level 6, at 60 fps, and only while the cameras are down. Watching the camera
+    // he is on puts that count back to zero (#400) — the way you stall him.
+    if (mFreddyReady && !mFreddyPending)
+    {
+        if (watching && (Room)mCameraIndex == mFreddy.mRoom)
+        {
+            mFreddyWait = 0.0f;
+        }
+        else
+        {
+            mFreddyWait += deltaTime * 60.0f;
+        }
+
+        if (mFreddyWait >= (float)(1000 - mFreddyActivity * 100) && !watching)
+        {
+            mFreddyWait = 0.0f;
+            mFreddyReady = false;
+            mFreddyPending = true;
+        }
+    }
+
+    // The original holds that "move now" state until one of his room's move events accepts it, so
+    // a blocked move waits rather than being thrown away: the stage needs Bonnie and Chica gone
+    // (#388), 4A needs the right light off (#392), and the corner needs the cameras UP and pointed
+    // somewhere else (#393, #394). So keep offering the move every frame, cameras up or down.
+    if (mFreddyPending && MoveFreddy())
+    {
+        mFreddyPending = false;
+    }
+
+    // The music box in the kitchen: once when he arrives (#398), then every 5 minutes he stays
+    // (#399). Its channel is 5 normally and 50 while you watch CAM 6 (#251-#257).
+    const bool inKitchen = mFreddy.mRoom == Room::Kitchen;
+    if (inKitchen)
+    {
+        const bool watched = watching && (Room)mCameraIndex == Room::Kitchen;
+        const float volume = watched ? 1.2f : 0.12f;
+        bool play = !mFreddyWasInKitchen;
+        if (!play)
+        {
+            mFreddyMusicTimer += deltaTime;
+            if (mFreddyMusicTimer >= 300.0f)
+            {
+                mFreddyMusicTimer -= 300.0f;
+                play = true;
+            }
+        }
+
+        if (play)
+        {
+            mFreddyMusicTimer = 0.0f;
+            mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], false, volume);
+        }
+        else if (mMusicBox.IsPlaying())
+        {
+            mMusicBox.SetVolume(volume);    // it follows the camera while it plays
+        }
+    }
+    else
+    {
+        mFreddyMusicTimer = 0.0f;
+    }
+    mFreddyWasInKitchen = inKitchen;
+}
+
+bool FnafGame::MoveFreddy()
+{
+    // His route round the east side, one room per move (#388-#394). The laugh and the footsteps
+    // get louder the closer he is: the original's channel volumes, on the mixer's 0..2 scale.
+    const Room before = mFreddy.mRoom;
+    Room next = before;
+    int32_t laughVolume = 0;
+    int32_t stepVolume = 0;
+
+    switch (before)
+    {
+    case Room::ShowStage:
+        // He leaves the stage last, once Bonnie and Chica have both gone (#388).
+        if (IsAt(mBonnie, Room::ShowStage) || IsAt(mChica, Room::ShowStage))
+        {
+            return false;
+        }
+        next = Room::DiningArea; laughVolume = 15; stepVolume = 30;
+        break;
+    case Room::DiningArea: next = Room::Restrooms;  laughVolume = 20; stepVolume = 35; break;
+    case Room::Restrooms:  next = Room::Kitchen;    laughVolume = 30; stepVolume = 40; break;
+    case Room::Kitchen:    next = Room::EastHall;   laughVolume = 40; stepVolume = 60; break;
+    case Room::EastHall:
+        // The right hall light holds him at 4A (#392).
+        if (mDoors[1].mLight)
+        {
+            return false;
+        }
+        next = Room::EastCorner; laughVolume = 60; stepVolume = 75;
+        break;
+    case Room::EastCorner:
+        // From the corner he only moves while you're on the cameras and not watching him (#393,
+        // #394): an open right door lets him in, a closed one sends him back up the hall.
+        if (!mTabletUp || (Room)mCameraIndex == Room::EastCorner)
+        {
+            return false;
+        }
+        if (mDoors[1].mClosed)
+        {
+            if ((Room)mCameraIndex == Room::EastHall)
+            {
+                return false;
+            }
+            next = Room::EastHall; laughVolume = 60; stepVolume = 75;
+        }
+        else
+        {
+            next = Room::Office; laughVolume = 80; stepVolume = 100;
+        }
+        break;
+    default:
+        return false;
+    }
+
+    mFreddy.mRoom = next;
+    OctLog("FNAF1: freddy -> room %d (level %d, hour %d)", (int)next, mFreddyActivity, mHour);
+
+    // One of his three laughs (#401-#403), with the running footsteps under it.
+    static const char* kLaughs[] = { "laugh", "laugh2", "laugh3" };
+    const char* laugh = kLaughs[rand() % 3];
+    char sizeKey[24];
+    snprintf(sizeKey, sizeof(sizeKey), "size_%s", laugh);
+    mJingle.Start((std::string("snd/") + laugh + ".pcm").c_str(), (uint32_t)mCounts[sizeKey],
+                  false, glm::min(2.0f, laughVolume * 0.024f));
+    PlaySound("freddysteps", false, glm::min(2.0f, stepVolume * 0.024f));
+
+    if (next == Room::Office)
+    {
+        mFreddyInOffice = true;
+        mFreddyKillTimer = 0.0f;
+        // His whispering loops until he takes you. It shares the player with Bonnie's and
+        // Chica's breathing: only one of them is ever in the room.
+        // One-shot, as the original plays it on the edge of him getting in (#404), on a channel it
+        // never turns down. Looping it would also block the office groans, which skip while this
+        // player is busy.
+        mBreath.Start("snd/whisper.pcm", (uint32_t)mCounts["size_whisper"], false, 2.0f);
+    }
+
+    return true;
+}
+
 void FnafGame::MoveAnimatronic(Animatronic& a)
 {
     const bool coin = (rand() & 1) != 0;
@@ -1478,14 +1768,6 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         case Room::RightDoor:  a.mRoom = mDoors[1].mClosed ? Room::EastHall : Room::Office; break;
         default: break;
         }
-    }
-
-    // Only one of them fits in each doorway.
-    const Animatronic& other = (&a == &mBonnie) ? mChica : mBonnie;
-    if ((a.mRoom == Room::LeftDoor || a.mRoom == Room::RightDoor) && other.mRoom == a.mRoom)
-    {
-        a.mRoom = before;
-        return;
     }
 
     if (a.mRoom != before)
@@ -1593,25 +1875,31 @@ void FnafGame::UpdateFoxy(float deltaTime)
 
     if (mFoxyStage < 3)
     {
-        // Watching the cameras keeps him in the cove, and he stays put for a while after.
+        // Any camera up re-arms his lock-out (#328: 50 + Random(1000) frames), and it counts down
+        // a frame at a time (#312).
         if (mTabletUp)
         {
-            mFoxyLockTimer = (50 + rand() % 1000) / 60.0f;   // the original: 50 + Random(1000) frames
-            return;
+            mFoxyLockTimer = (50 + rand() % 1000) / 60.0f;
         }
-
-        if (mFoxyLockTimer > 0.0f)
+        else if (mFoxyLockTimer > 0.0f)
         {
             mFoxyLockTimer -= deltaTime;
-            return;
         }
 
-        mFoxyMoveTimer += deltaTime;
-        if (mFoxyMoveTimer >= kFoxyMoveInterval)
+        // #190 tests "not watching CAM 1C" before its 5.01 s timer, so only Pirate Cove itself
+        // stops the clock; the lock-out is its *last* condition, so a tick that lands during the
+        // lock-out is spent and lost rather than saved for later. Pausing the timer instead would
+        // hand him a free move after every look at the cameras.
+        const bool watchingCove = mTabletUp && mTabletProgress >= 1.0f && (Room)mCameraIndex == Room::PirateCove;
+        if (!watchingCove)
+        {
+            mFoxyMoveTimer += deltaTime;
+        }
+        if (mFoxyMoveTimer >= kFoxyMoveInterval && !watchingCove)
         {
             mFoxyMoveTimer -= kFoxyMoveInterval;
-            const int32_t ai = kFoxyBaseAi + (mHour >= 3) + (mHour >= 4);
-            if ((rand() % 20) + 1 <= ai)
+            const int32_t ai = GetNightActivity(mNight).mFoxy + (mHour >= 3) + (mHour >= 4);
+            if ((rand() % 20) + 1 <= ai && mFoxyLockTimer <= 0.0f)
             {
                 mFoxyStage++;
                 OctLog("FNAF1: foxy stage %d (hour %d)", mFoxyStage, mHour);
@@ -1732,6 +2020,7 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     else if (mJumpWho == "chica")   fps = 59.4f;
     else if (mJumpWho == "foxy")    fps = 30.0f;
     else if (mJumpWho == "freddy")  fps = 36.0f;
+    else if (mJumpWho == "freddyoffice") fps = 30.0f;   // the office attack's animation speed 50
     const float frameSeconds = 1.0f / fps;
     if (mJumpTimer >= frameSeconds && mJumpFrame + 1 < frames)
     {
@@ -1753,6 +2042,8 @@ void FnafGame::UpdateJumpscare(float deltaTime)
         AudioManager::StopAllSounds();      // the scream ends with the animation
         mState = State::GameOver;
         mGameOverTimer = 0.0f;
+        mGameOverRollTimer = 0.0f;
+        mGameOverRare = false;
         mMenuShown.clear();
         ShowMenuWidgets(false, false, false);
         mMenuBlack->SetVisible(true);
@@ -1810,11 +2101,17 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
             mHallucinationTime = 0.0f;
         }
     }
+    // The roll is once per 60 Hz tick, so a 30 fps frame owes two of them; rolling once per frame
+    // gives about half the flashes across the 100-frame window.
     mHallucinationStepTimer += deltaTime;
     if (mHallucinationStepTimer >= 1.0f / 60.0f)
     {
-        mHallucinationStepTimer = fmod(mHallucinationStepTimer, 1.0f / 60.0f);
-        const bool rolledOne = (rand() % 10) == 1;
+        bool rolledOne = false;
+        while (mHallucinationStepTimer >= 1.0f / 60.0f)
+        {
+            mHallucinationStepTimer -= 1.0f / 60.0f;
+            rolledOne = rolledOne || (rand() % 10) == 1;
+        }
         mHallucinationVisible = mHallucination && rolledOne;
         if (mHallucinationVisible && !mRobotVoiceOn)
         {
@@ -1876,8 +2173,11 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
         mYellowBearShown = true;
     }
 
-    // #420, #421: 300 frames (5 s) in the office with him ends the game.
-    if (mYellowBearShown)
+    // #420, #421: 300 frames (5 s) in the office with him ends the game. #426/#427 hide him while
+    // Bonnie's or Chica's in-office picture is up, and #420 only counts while he is on screen, so
+    // their attack suspends his five seconds.
+    const bool hiddenByAttack = IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office);
+    if (mYellowBearShown && !hiddenByAttack)
     {
         mYellowBearShownTime += deltaTime;
         if (mYellowBearShownTime >= 300.0f / 60.0f)
@@ -1994,11 +2294,14 @@ std::string FnafGame::GetCameraImage(Room camera) const
         if (bonnie && chica) return "cam1a_all";
         if (chica) return "cam1a_no_bonnie";
         if (bonnie) return "cam1a_no_chica";
+        // Once Freddy has left too the stage is empty (#28).
+        if (!IsAt(mFreddy, Room::ShowStage)) return "cam1a_empty";
         return (pic <= 10) ? "cam1a_freddy_stare" : "cam1a_freddy";
     case Room::DiningArea:
-        // Chica wins when both are there.
+        // Chica wins when both are there, and both of them win over Freddy (#30-#35).
         if (chica) return (mChica.mPose == 1) ? "cam1b_chica2" : "cam1b_chica";
         if (bonnie) return (mBonnie.mPose == 1) ? "cam1b_bonnie" : "cam1b_bonnie2";
+        if (IsAt(mFreddy, Room::DiningArea)) return "cam1b_freddy";
         return "cam1b_empty";
     case Room::PirateCove:
     {
@@ -2018,6 +2321,7 @@ std::string FnafGame::GetCameraImage(Room camera) const
         return (pic <= 5) ? "cam5_rare" : "cam5_empty";
     case Room::Restrooms:
         if (chica) return (mChica.mPose == 1) ? "cam7_chica" : "cam7_chica2";
+        if (IsAt(mFreddy, Room::Restrooms)) return "cam7_freddy";
         return "cam7_empty";
     case Room::Kitchen:      return "";
     case Room::WestHall:
@@ -2050,8 +2354,11 @@ std::string FnafGame::GetCameraImage(Room camera) const
         return (pic < 2) ? "cam2b_rare_freddy" : "cam2b_empty";
     case Room::EastHall:
         if (chica) return (mChica.mPose == 1) ? "cam4a_chica" : "cam4a_chica2";
+        // The rare pictures are tested first (#73-#75 run before #77), and he shows on 4A only
+        // while he's actually there: from the corner (4B) the hall looks empty (#76, #77).
         if (pic == 99) return "cam4a_rare_faces";
         if (pic == 100) return "cam4a_rare_itsme";
+        if (IsAt(mFreddy, Room::EastHall)) return "cam4a_freddy";
         return "cam4a_empty";
     case Room::EastCorner:
         if (chica)
@@ -2061,6 +2368,7 @@ std::string FnafGame::GetCameraImage(Room camera) const
             if (mNight >= 4 && mGlitchRoll >= 25) return "cam4b_chica_glitch1";
             return "cam4b_chica";
         }
+        if (IsAt(mFreddy, Room::EastCorner)) return "cam4b_freddy";
         if (pic >= 97)
         {
             // One of four newspaper clippings: 97, 98, 99 or 100.
@@ -2193,7 +2501,9 @@ void FnafGame::UpdateView(float deltaTime)
     }
 
     const bool night = (mState == State::Playing || mState == State::PowerOut);
-    const bool goldenOn = night && mYellowBearShown && mGoldenSprite.Get() != nullptr;
+    // #426/#427: Bonnie's or Chica's in-office picture hides him while their attack plays out.
+    const bool goldenOn = night && mYellowBearShown && mGoldenSprite.Get() != nullptr &&
+                          !IsAt(mBonnie, Room::Office) && !IsAt(mChica, Room::Office);
     mGoldenQuad->SetVisible(goldenOn);
     if (goldenOn)
     {
@@ -2362,6 +2672,9 @@ void FnafGame::BuildMenuUi()
         text->SetVisible(false);
         return text;
     };
+    // The original has a "6th night" picture in its atlas; ours is drawn with the game's text,
+    // under Continue and in the same style as the night intro.
+    mMenuSixthText = makeMenuText("MenuSixth", 26.0f);
     mIntroClockText = makeMenuText("IntroClock", 34.0f);
     mIntroNightText = makeMenuText("IntroNight", 34.0f);
     mGameOverLabel = makeMenuText("GameOverLabel", 34.0f);
@@ -2393,6 +2706,10 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
     mMenuBlack->SetVisible(menu || newspaper || intro);
     mMenuBack->SetVisible(menu || newspaper);
     mMenuStaticQuad->SetVisible(menu || intro);
+    if (mMenuSixthText != nullptr)
+    {
+        mMenuSixthText->SetVisible(menu && mBeatGame);
+    }
 
     for (Quad* quad : { mMenuTitle, mMenuNewGame, mMenuContinue, mMenuArrows, mMenuCopyright })
     {
@@ -2436,6 +2753,9 @@ void FnafGame::EnterMenu()
     PlaceSprite(mMenuTitle, mMenuTitleSprite, 175.0f, 80.0f);
     PlaceSprite(mMenuNewGame, mMenuNewGameSprite, 175.0f, 400.0f);
     PlaceSprite(mMenuContinue, mMenuContinueSprite, 175.0f, 470.0f);
+    LoadProgress();
+    mMenuSixthText->SetRect(175.0f * mScreenWidth / 1280.0f, 540.0f * mScreenHeight / 720.0f, mScreenWidth * 0.5f, 40.0f);
+    mMenuSixthText->SetText("6th Night");
     PlaceSprite(mMenuCopyright, mMenuCopyrightSprite, 1260.0f - mMenuCopyrightSprite.mWidth * 2.0f, 690.0f);
     ShowMenuWidgets(true, false, false);
 
@@ -2450,11 +2770,12 @@ void FnafGame::StartNightIntro()
     mState = State::NightIntro;
     mMenuTimer = 0.0f;
 
-    // "12:00 AM" centred, "1st Night" centred below it.
+    // "12:00 AM" centred, the night's name centred below it.
+    static const char* kNightNames[] = { "1st Night", "2nd Night", "3rd Night", "4th Night", "5th Night", "6th Night" };
     mIntroClockText->SetRect(0.0f, mScreenHeight * 0.40f, mScreenWidth, 50.0f);
     mIntroClockText->SetText("12:00 AM");
     mIntroNightText->SetRect(0.0f, mScreenHeight * 0.50f, mScreenWidth, 50.0f);
-    mIntroNightText->SetText("1st Night");
+    mIntroNightText->SetText(kNightNames[glm::clamp(mNight, 1, 6) - 1]);
     ShowMenuWidgets(false, false, true);
     PlaySound("blip");
 }
@@ -2493,18 +2814,35 @@ void FnafGame::UpdateMenu(float deltaTime)
             mMenuStaticQuad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 0.15f + (rand() % 20) / 100.0f));
         }
 
-        if (Pressed(GAMEPAD_UP) || Pressed(GAMEPAD_DOWN))
+        // New Game, Continue, and the 6th night once night 5 has been beaten (the original's
+        // menu grows the same way).
+        const int32_t options = mBeatGame ? 3 : 2;
+        if (Pressed(GAMEPAD_DOWN))
         {
-            mMenuSelection = 1 - mMenuSelection;
+            mMenuSelection = (mMenuSelection + 1) % options;
             PlaySound("blip");
         }
-        PlaceSprite(mMenuArrows, mMenuArrowsSprite, 95.0f, mMenuSelection == 0 ? 402.0f : 474.0f);
+        else if (Pressed(GAMEPAD_UP))
+        {
+            mMenuSelection = (mMenuSelection + options - 1) % options;
+            PlaySound("blip");
+        }
+        static const float kArrowY[] = { 402.0f, 474.0f, 544.0f };
+        PlaceSprite(mMenuArrows, mMenuArrowsSprite, 95.0f, kArrowY[glm::clamp(mMenuSelection, 0, 2)]);
 
         if (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))
         {
             if (mMenuSelection == 0)
             {
-                // New Game: the help-wanted ad first.
+                // New Game: back to night 1 (the original rewrites its saved level), after the
+                // help-wanted ad.
+                mNight = 1;
+                mSavedNight = 1;
+                for (bool& played : mCallPlayed)
+                {
+                    played = false;     // New Game clears the original's "play voice" counters
+                }
+                SaveProgress();
                 StopStreams();
                 mState = State::Newspaper;
                 mMenuTimer = 0.0f;
@@ -2514,6 +2852,7 @@ void FnafGame::UpdateMenu(float deltaTime)
             }
             else
             {
+                mNight = (mMenuSelection == 2) ? 6 : mSavedNight;
                 StartNightIntro();
             }
         }
@@ -2540,6 +2879,106 @@ void FnafGame::UpdateMenu(float deltaTime)
 
     default:
         break;
+    }
+}
+
+// Progress, as the original keeps it in its .ini: the night Continue starts ("level", never past
+// 6) and whether night 5 has been beaten ("beatgame", which offers the 6th night). It's a small
+// file next to the game on the SD; on a disc, or in Dolphin without one, saving just fails and
+// every run starts fresh.
+static const char* kSavePaths[] = { "/FNAF1.sav", "FNAF1/FNAF1.sav", "FNAF1.sav" };
+
+void FnafGame::LoadProgress()
+{
+    void OctLockFileIo();
+    void OctUnlockFileIo();
+
+    for (const char* path : kSavePaths)
+    {
+        OctLockFileIo();
+        FILE* file = fopen(path, "rb");
+        int32_t night = 0;
+        int32_t beat = 0;
+        const bool read = file != nullptr && fscanf(file, "%d %d", &night, &beat) == 2;
+        if (file != nullptr)
+        {
+            fclose(file);
+        }
+        OctUnlockFileIo();
+
+        if (read)
+        {
+            // The original clamps Continue to night 5 (its title frame's #57); the 6th night is
+            // only reachable from its own menu entry.
+            mSavedNight = glm::clamp(night, 1, 5);
+            mBeatGame = beat != 0;
+            OctLog("FNAF1: progress from %s: night %d, beaten %d", path, mSavedNight, (int)mBeatGame);
+            return;
+        }
+    }
+}
+
+void FnafGame::SaveProgress()
+{
+    void OctLockFileIo();
+    void OctUnlockFileIo();
+
+    // The original only writes the level while it's going up and still under 6 (#339), so a
+    // replay of an earlier night never sets you back.
+    if (mNight > mSavedNight && mNight < 6)
+    {
+        mSavedNight = mNight;
+    }
+    mBeatGame = mBeatGame || mNight >= 6;
+
+    for (const char* path : kSavePaths)
+    {
+        OctLockFileIo();
+        FILE* file = fopen(path, "wb");
+        const bool wrote = file != nullptr && fprintf(file, "%d %d\n", mSavedNight, mBeatGame ? 1 : 0) > 0;
+        if (file != nullptr)
+        {
+            fclose(file);
+        }
+        OctUnlockFileIo();
+
+        if (wrote)
+        {
+            OctLog("FNAF1: progress saved to %s: night %d, beaten %d", path, mSavedNight, (int)mBeatGame);
+            return;
+        }
+    }
+    OctLog("FNAF1: progress could not be saved");
+}
+
+// The original's ending frames: the picture, the music box, and 15 s before it goes back to the
+// title (any button skips it here).
+static constexpr float kEndingSeconds = 15.0f;
+
+void FnafGame::StartEnding(const char* image)
+{
+    AudioManager::StopAllSounds();
+    StopStreams();
+    mState = State::Ending;
+    mEndingTimer = 0.0f;
+    mEndingImage = image;
+    OctLog("FNAF1: ending %s (night %d)", image, mNight);
+
+    ShowMessage("");
+    ShowMenuWidgets(false, true, false);    // the newspaper's layout: the picture on black
+    mMenuShown.clear();
+    ShowImage(mJumpCanvas, mEndingImage, mMenuShown);
+    mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    mMenuBack->SetVisible(true);
+    mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], false, 1.0f);
+}
+
+void FnafGame::UpdateEnding(float deltaTime)
+{
+    mEndingTimer += deltaTime;
+    if (mEndingTimer >= kEndingSeconds || (mEndingTimer > 1.0f && (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))))
+    {
+        EnterMenu();
     }
 }
 
@@ -2578,9 +3017,24 @@ void FnafGame::UpdateGameOver(float deltaTime)
         mGameOverLabel->SetVisible(true);
     }
 
+    // The game over screen rolls Random(10000) + 1 every second (its frame's #4); on a 1 it goes
+    // to the "creepy end" instead of the title (#2).
+    mGameOverRollTimer += deltaTime;
+    if (mGameOverRollTimer >= 1.0f)
+    {
+        mGameOverRollTimer -= 1.0f;
+        mGameOverRare = mGameOverRare || (rand() % 10000) == 1;
+    }
+
     const float shown = mGameOverTimer - kGameOverStaticSeconds;
     if (shown >= kGameOverSeconds || (shown > 1.0f && (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))))
     {
+        if (mGameOverRare)
+        {
+            OctLog("FNAF1: rare game over");
+            StartCreepyEnd();
+            return;
+        }
         EnterMenu();
     }
 }
@@ -2681,8 +3135,24 @@ void FnafGame::UpdateWin(float deltaTime)
         alpha = 1.0f - glm::clamp(mWinFadeTime / kWinFadeOutSeconds, 0.0f, 1.0f);
         if (mWinFadeTime >= kWinFadeOutSeconds)
         {
-            // The original goes on to the next night; there's only night 1 so far, so the menu.
-            EnterMenu();
+            // The original's "next day" frame counts the night up and picks where to go next
+            // (its #5-#10): nights 1-4 go straight into the next one, finishing night 5 pays
+            // overtime, and finishing night 6 gets you fired. Its third ending, the $120.00
+            // cheque, belongs to the custom night, which this port doesn't have.
+            mNight += 1;
+            SaveProgress();
+            if (mNight == 6)
+            {
+                StartEnding("paycheck_overtime");   // $120.50 with overtime
+            }
+            else if (mNight > 6)
+            {
+                StartEnding("fired");               // the notice of termination
+            }
+            else
+            {
+                StartNightIntro();
+            }
             return;
         }
         break;
@@ -2746,7 +3216,11 @@ static const float kFlashBands[kFlashFrames][2][2] = {
 
 void FnafGame::StartCameraFlash()
 {
+    // In the original the flash and the blip are one thing: #15 creates the white bands and plays
+    // blip3 together, for a camera switch (#17), the first camera of a raise, and someone moving
+    // on the camera you're watching (#195).
     mFlashTime = 0.0f;
+    PlaySound("blip");
 }
 
 void FnafGame::UpdateTabletUi(float deltaTime, bool cameraOn)
@@ -2865,13 +3339,16 @@ void FnafGame::UpdateTabletUi(float deltaTime, bool cameraOn)
 
 void FnafGame::UpdateHud()
 {
+    // #285 hides the whole readout when the power goes: no clock, no night, no power, no usage —
+    // only the dark office is left. The clock keeps running underneath (#263, #302).
     const bool playing = (mState == State::Playing || mState == State::PowerOut);
-    mTimeText->SetVisible(playing);
-    mNightText->SetVisible(playing);
-    mPowerText->SetVisible(playing);
-    mUsageText->SetVisible(playing && mState != State::PowerOut);
+    const bool hudOn = (mState == State::Playing);
+    mTimeText->SetVisible(hudOn);
+    mNightText->SetVisible(hudOn);
+    mPowerText->SetVisible(hudOn);
+    mUsageText->SetVisible(hudOn);
 
-    if (!playing)
+    if (!playing || !hudOn)
     {
         return;
     }
@@ -2879,7 +3356,9 @@ void FnafGame::UpdateHud()
     char text[64];
     snprintf(text, sizeof(text), "%d AM", mHour == 0 ? 12 : mHour);
     mTimeText->SetText(text);
-    mNightText->SetText("Night 1");
+    char nightLabel[16];
+    snprintf(nightLabel, sizeof(nightLabel), "Night %d", mNight);
+    mNightText->SetText(nightLabel);
 
     snprintf(text, sizeof(text), "Power left: %d%%", (int)ceil(mPower));
     mPowerText->SetText(text);

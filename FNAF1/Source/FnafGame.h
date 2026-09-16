@@ -52,6 +52,7 @@ private:
         GameOver,
         Win,
         CreepyEnd,      // Golden Freddy got you: his face and scream for 1 s, then the GameCube resets
+        Ending,         // after the last night: the paycheck (or the termination notice)
     };
 
     struct Animatronic
@@ -111,6 +112,10 @@ private:
     void UpdateGameOver(float deltaTime);
     void StartWin();
     void UpdateWin(float deltaTime);
+    void StartEnding(const char* image);
+    void UpdateEnding(float deltaTime);
+    void LoadProgress();
+    void SaveProgress();
 
     void UpdatePlaying(float deltaTime);
     void UpdateInput(float deltaTime);
@@ -123,6 +128,8 @@ private:
     void UpdateHud();
 
     void MoveAnimatronic(Animatronic& a);
+    void UpdateFreddy(float deltaTime);
+    bool MoveFreddy();      // false when his room's conditions block it, so the move stays pending
     void UpdateFoxy(float deltaTime);
     void FoxyArrive();
     void LowerTablet();
@@ -140,6 +147,7 @@ private:
     void ShowMessage(const std::string& message);
 
     int32_t GetAi(const Animatronic& a) const;
+    const char* GetCallFile() const;
     bool IsAt(const Animatronic& a, Room room) const;
     std::string GetCameraImage(Room camera) const;
     float GetPirateSongVolume() const;
@@ -243,6 +251,7 @@ private:
     Quad* mMenuContinue = nullptr;
     Quad* mMenuArrows = nullptr;
     Quad* mMenuCopyright = nullptr;
+    Text* mMenuSixthText = nullptr;     // "6th Night", offered once night 5 is beaten
     Text* mIntroClockText = nullptr;    // "12:00 AM" and "1st Night"
     Text* mIntroNightText = nullptr;
     Sprite mMenuTitleSprite;
@@ -256,6 +265,8 @@ private:
     float mMenuFrameTimer = 0.0f;
     Text* mGameOverLabel = nullptr;
     float mGameOverTimer = 0.0f;
+    float mGameOverRollTimer = 0.0f;    // the game over screen's 1-in-10000-per-second roll
+    bool mGameOverRare = false;         // it came up: the "creepy end" follows instead of the title
     float mScreenWidth = 640.0f;
     float mScreenHeight = 480.0f;
 
@@ -264,6 +275,19 @@ private:
     Door mDoors[2];             // [0] left, [1] right
     Animatronic mBonnie;
     Animatronic mChica;
+
+    // Freddy. He only moves with the cameras down, waits out a countdown between moves (the
+    // original's 1000 - activity x 100 frames), and leaves the stage last. Once he's in the
+    // office he whispers until a 1-in-4-per-second roll kills you.
+    Animatronic mFreddy;
+    int32_t mFreddyActivity = 0;    // his own activity level: rolled at the start of the night
+    float mFreddyWait = 0.0f;       // frames waited since his move roll came up (60 fps)
+    bool mFreddyReady = false;      // the roll came up: he's counting down to the move
+    bool mFreddyPending = false;    // the countdown finished: he moves as soon as the room allows
+    bool mFreddyWasInKitchen = false;
+    bool mFreddyInOffice = false;
+    float mFreddyKillTimer = 0.0f;  // 1 s between his kill rolls once he's inside
+    float mFreddyMusicTimer = 0.0f; // the music box he plays in the kitchen every 300 s
 
     // Foxy: Pirate Cove stage 0 (curtains closed) .. 3 (gone), then runs to the left door.
     int32_t mFoxyStage = 0;
@@ -277,12 +301,18 @@ private:
     int32_t mFoxyKnocks = 0;
     float mNightTime = 0.0f;
     int32_t mNight = 1;             // which night is being played
+    int32_t mSavedNight = 1;        // what Continue starts (the original's "level" in its .ini)
+    bool mCallPlayed[7] = {};       // the original's "play voice N": a retried night has no call again
+    bool mBeatGame = false;         // night 5 done: the 6th night is offered on the menu
+    float mEndingTimer = 0.0f;      // the paycheck screen's 15 s
+    std::string mEndingImage;
     int32_t mHour = 0;
     int32_t mGlitchRoll = 1;        // the original's 1-30, re-rolled every 50 ms (#387)
     float mGlitchTimer = 0.0f;
     float mVoiceRollTimer = 0.0f;   // robot voice volume roll, every 100 ms (#381-#384)
     float mPower = 100.0f;
     int32_t mUsage = 1;
+    float mPowerDrainTimer = 0.0f;  // the night's extra drain (#341-#344)
     float mOfficePan = 0.5f;    // 0..1
     bool mTabletUp = false;
     float mTabletProgress = 0.0f;

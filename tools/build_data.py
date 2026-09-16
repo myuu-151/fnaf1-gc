@@ -48,9 +48,13 @@ BACKGROUNDS = {
     # Show Stage: 19 = normal pose (2 is the rare everyone-stares frame); alone, Freddy faces forward (224; 355 is him staring).
     "cam1a_all": 19, "cam1a_no_bonnie": 68, "cam1a_no_chica": 223, "cam1a_freddy": 224,
     "cam1a_freddy_stare": 355,      # rare variant ("random for pic" in the original)
+    "cam1a_empty": 484,             # from night 3 Freddy roams too, and the stage can be empty (#28)
     # Bonnie and Chica have two poses on some cameras (the original re-rolls it on every move):
     # 1B Bonnie 90 / 120, 1B Chica 222 / 215, 4A Chica 221 / 226, 7 Chica 217 / 219.
     "cam1b_empty": 48, "cam1b_bonnie": 90, "cam1b_bonnie2": 120, "cam1b_chica": 215, "cam1b_chica2": 222,
+    # Freddy on his way round the east side (#31, #66, #77, #55): dining, bathrooms, 4A, 4B.
+    # (CAM 6, the kitchen, has no picture at all, so he's only heard there.)
+    "cam1b_freddy": 492, "cam7_freddy": 494, "cam4a_freddy": 487, "cam4b_freddy": 486,
     "cam1c_0": 66, "cam1c_1": 211, "cam1c_2": 338, "cam1c_3": 240,   # Pirate Cove: closed, peeking, stepping out, gone
     "cam5_empty": 83, "cam5_bonnie": 205,
     "cam5_rare": 354, "cam5_bonnie_stare": 555,     # "random for pic" <= 5 empty, <= 10 with Bonnie
@@ -79,6 +83,12 @@ BACKGROUNDS = {
     "menu_freddy0": 431, "menu_freddy1": 440, "menu_freddy2": 441, "menu_freddy3": 442,
     "newspaper": 539,               # help-wanted ad shown on New Game
     "gameover": 358,                # after the static: Freddy in the backstage room
+    # End screens (the original's "the end" frames). Its "next day" frame picks them by the night
+    # it has just counted up: 6 -> "the end 2" (the overtime cheque, after night 5), 7 -> "the end
+    # 3" (the termination notice, after night 6), 8 -> "the end" (the plain cheque, custom night,
+    # which this port doesn't have). The dates printed on the two cheques run the other way round;
+    # they're inconsistent in the original, so don't order these by them.
+    "paycheck": 210, "paycheck_overtime": 522, "fired": 523,
 }
 
 # Menu text in the texture atlases: (atlas, x, y, w, h). Stored at their size on a 640x480
@@ -101,6 +111,8 @@ JUMPSCARES = {
     "bonnie": [301, 291, 303] + list(range(293, 301)),
     "chica": [279, 65, 281, 69, 216] + list(range(228, 238)) + [239],
     "freddy": [326, 307, 348] + list(range(308, 326)),    # power-out: lunging out of the dark (1280x720, drawn full screen)
+    # Freddy's own attack once he's walked into the office (the night frame's animation 65).
+    "freddyoffice": [519, 485, 521, 489, 490, 491, 493] + list(range(495, 519)),
     "foxy": [413, 242, 415, 243] + list(range(396, 413)) + [412] * 4,     # lunging in from the left doorway, then holds
 }
 # Foxy running down the West Hall (CAM 2A), far to past the camera.
@@ -134,11 +146,16 @@ SOUNDS = {
     "pots4": (18, 3.0),          # OVEN-DRA_7 (the original's 5 kitchen actions use it twice); trimmed, it's long
     "error": (4, None),          # error: door/light buttons while someone is in the office
     "giggle": (38, None),        # Laugh_Giggle_Girl_1: Golden Freddy's poster on CAM 2B
+    "freddysteps": (55, None),   # running fast3: Freddy's footsteps, louder the closer he gets
 }
 
 # Long sounds, streamed from the disc at runtime instead of loaded into RAM.
 STREAMS = {
     "call": (41, None),          # voiceover1c: the night 1 phone call
+    "call2": (42, None),         # voiceover2a .. voiceover5, one per night (#361-#365; night 6 has none)
+    "call3": (43, None),
+    "call4": (44, None),
+    "call5": (45, None),
     "ambience": (28, None),      # ambience2: replaces the dark ambience when the power runs out
     "eerie": (37, None),         # EerieAmbienceLargeSca: loops all night, volume rises as they get close
     "darkambience": (0, None),   # ColdPresc B: loops from the start of the night
@@ -157,7 +174,10 @@ STREAMS = {
     "fan": (2, None),            # Buzz_Fan_Florescent2 (loops all night)
     "chimes": (32, None),        # chimes 2 (6 AM): its fade-out tail plays until the next frame starts (~10.2 s)
     "cheer": (33, None),         # CROWD_SMALL_CHIL (6 AM)
-    "laugh": (56, None),         # Laugh_Giggle_Girl_1d (Freddy, power out)
+    "laugh": (56, None),         # Laugh_Giggle_Girl_1d (Freddy, power out, and one of his three move laughs)
+    "laugh2": (57, None),        # Laugh_Giggle_Girl_2d, Laugh_Giggle_Girl_8d: the other two (#401-#403)
+    "laugh3": (58, None),
+    "whisper": (59, None),       # whispering2: loops while he's stood in the office (#404)
     "xscream2": (46, None),      # XSCREAM2: Golden Freddy's "creepy end"
     "robotvoice": (40, None),    # robotvoice: plays under the hallucination flashes
 }
