@@ -294,8 +294,6 @@ private:
     Sprite mMenuCopyrightSprite;
     std::string mMenuShown;
     int32_t mMenuSelection = 0;         // 0 = New Game, 1 = Continue, 2 = 6th Night
-    int32_t mMenuChosen = -1;           // the option being confirmed, once its 20 frames are up
-    float mMenuChosenTime = 0.0f;
     float mMenuTimer = 0.0f;
     float mMenuFrameTimer = 0.0f;
     Text* mGameOverLabel = nullptr;

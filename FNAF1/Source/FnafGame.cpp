@@ -57,6 +57,16 @@
 //  8. Foxy's arrival snaps the view to the left door; in the original it drifts there because the
 //     cursor is sitting on the tablet bar, which a controller has no equivalent for.
 //
+// The rule behind most of item 3, learned the slow way: the original's timings describe a game
+// whose pictures were already in memory. Ours arrive with a disc read and a JPEG decode behind
+// them, so copying a number that was free there can cost something here — and it costs most on
+// whatever the player does most often. Matching the static's 60 Hz animation, the flat 40-frame
+// cut on Bonnie's and Chica's attacks, the 0.367 s tablet flip and the 20-frame wait after
+// choosing a menu option were all tried against the events and taken back out, because each one
+// spent real time to reproduce something nobody could see. The fades, the blip flash and the
+// picture choices were worth matching exactly, because they cost nothing extra. When a finding
+// says "the original does X every tick", the question to ask first is what X costs us.
+//
 // ----------------------------------------------------------------------------------------------
 
 // Layout of the original 1600x720 office, in its own pixels.
@@ -82,8 +92,11 @@ static constexpr float kFanHeight = 196.0f;
 static constexpr float kFirstHourSeconds = 90.0f;
 static constexpr float kHourSeconds = 89.0f;
 static constexpr float kDoorSpeed = 5.0f;        // door animation, 1/seconds
-// The flip panel's 11 frames run at animation speed 50 (30 fps), so a flip takes 0.367 s.
-static constexpr float kTabletSpeed = 1.0f / 0.367f;
+// PORT: the flip panel's 11 frames run at animation speed 50 (30 fps), so the original's flip takes
+// 0.367 s. Ours stays at a quarter second: raising and lowering the tablet is the thing you do most
+// of all night, and the slower one reads as sluggish when every flip also carries a disc read and a
+// decode behind it. (The 11th picture is still drawn, so the feed doesn't appear a frame early.)
+static constexpr float kTabletSpeed = 4.0f;
 // PORT: the stick drives the pan. Full deflection matches the original's fast mouse zones (5 px a
 // frame across its 320 px of travel) and a light push its slow ones (2 px a frame).
 static constexpr float kPanSpeed = 0.9f;         // office pan, screens/second
@@ -1246,6 +1259,7 @@ void FnafGame::UpdateEerieAndPower(float deltaTime)
 void FnafGame::StartPowerOut()
 {
     mPower = 0.0f;
+    SetFade(0.0f);      // no transition on this one: the lights just go
     mState = State::PowerOut;
     mTabletUp = false;
     mTabletProgress = 0.0f;
@@ -2246,6 +2260,7 @@ void FnafGame::EndJumpscare()
     mJumpCutTime = -1.0f;
     mJump->SetVisible(false);
     AudioManager::StopAllSounds();      // the scream ends with the animation
+    SetFade(0.0f);      // the static runs unfaded; the picture after it does the fading in
     mState = State::GameOver;
     mGameOverTimer = 0.0f;
     mGameOverRollTimer = 0.0f;
@@ -2439,6 +2454,7 @@ void FnafGame::StartCreepyEnd()
     StopStreams();
     OctLog("FNAF1: golden freddy creepy end");
 
+    SetFade(0.0f);      // its frame has no transition either
     mState = State::CreepyEnd;
     mCreepyEndTimer = 0.0f;
     mTabletUp = false;
@@ -3043,8 +3059,6 @@ void FnafGame::EnterMenu()
     mMenuSelection = (mSavedNight > 1) ? 1 : 0;
     mMenuTimer = 0.0f;
     mMenuFrameTimer = 0.0f;
-    mMenuChosen = -1;
-    mMenuChosenTime = 0.0f;
     mTitleGlitchFrame = 0;
     mTitleGlitchFrameTimer = 0.0f;
     mTitleGlitchRollTimer = 0.0f;
@@ -3079,6 +3093,7 @@ void FnafGame::EnterMenu()
 void FnafGame::StartNightIntro()
 {
     StopStreams();
+    SetFade(0.0f);      // it cuts in; only its fade out is a transition
     mState = State::NightIntro;
     mMenuTimer = 0.0f;
 
@@ -3329,25 +3344,13 @@ void FnafGame::UpdateMenu(float deltaTime)
         static const float kArrowY[] = { 402.0f, 474.0f, 553.0f };
         PlaceSprite(mMenuArrows, mMenuArrowsSprite, 95.0f, kArrowY[glm::clamp(mMenuSelection, 0, 2)]);
 
-        // Choosing an option doesn't act at once: the original counts 20 frames first (#36-#40),
-        // about a third of a second, with the blip playing over it.
-        if ((Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START)) && mMenuChosen < 0)
+        // PORT: this acts on the press. The original counts 20 frames first (#36-#40, about a third
+        // of a second) before it leaves the menu, and with the next frame's own fade following it
+        // that reads as a lag on every selection.
+        if (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))
         {
-            mMenuChosen = mMenuSelection;
-            mMenuChosenTime = 0.0f;
+            const int32_t chosen = mMenuSelection;
             PlaySound("blip");
-        }
-
-        if (mMenuChosen >= 0)
-        {
-            mMenuChosenTime += deltaTime;
-            if (mMenuChosenTime < 21.0f / 60.0f)
-            {
-                break;
-            }
-
-            const int32_t chosen = mMenuChosen;
-            mMenuChosen = -1;
             if (chosen == 0)
             {
                 // New Game: back to night 1 (the original rewrites its saved level), after the
@@ -3365,10 +3368,11 @@ void FnafGame::UpdateMenu(float deltaTime)
                 SaveProgress();
                 mState = State::Newspaper;
                 ShowImage(mJumpCanvas, "newspaper", mMenuShown);
-                // Straight up at full strength: its frame is the picture, a 5 s timer and the
-                // skip, with nothing that fades it either way.
+                // The picture itself is drawn at full strength; the fading is the frame's own
+                // transition, done with the black overlay below.
                 mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
                 ShowMenuWidgets(false, true, false);
+                SetFade(1.0f);  // black from this frame: the fade starts here, not on the next update
             }
             else
             {
@@ -3521,6 +3525,7 @@ void FnafGame::StartEnding(const char* image)
     ShowImage(mJumpCanvas, mEndingImage, mMenuShown);
     mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
     mMenuBack->SetVisible(true);
+    SetFade(1.0f);  // likewise: its fade in starts on the frame the screen appears
     mMusicBox.Start("snd/musicbox.pcm", (uint32_t)mCounts["size_musicbox"], false, 1.0f);
 }
 
@@ -3638,6 +3643,7 @@ void FnafGame::StartWin()
     AudioManager::StopAllSounds();
     StopStreams();
     mJingle.Start("snd/chimes.pcm", (uint32_t)mCounts["size_chimes"], false, 1.0f);
+    SetFade(1.0f);      // black from this frame: its 1010 ms fade in starts here
     mState = State::Win;
     mTabletUp = false;
     mTabletProgress = 0.0f;
@@ -3743,10 +3749,14 @@ void FnafGame::UpdateWin(float deltaTime)
     const float digitRight = 602.0f * mScreenWidth / 1280.0f;
     mWinFiveText->SetRect(0.0f, (kWinFiveY - moved) * scaleY, digitRight, 60.0f);
     mWinSixText->SetRect(0.0f, (kWinFiveY - moved + kWinSixDy) * scaleY, digitRight, 60.0f);
+    // Its fade is the frame's own transition (1010 ms in, 900 ms out, the same pair the transition
+    // chunk holds), so it goes through the black overlay like every other screen rather than being
+    // applied to these three widgets — which left the masks and everything else unfaded.
     for (Text* text : { mWinFiveText, mWinSixText, mWinAmText })
     {
-        text->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, alpha));
+        text->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
     }
+    SetFade(1.0f - alpha);
 }
 
 // The tablet's map overlay, from the original's objects: the floor plan ("Active 9") at (848, 313),
