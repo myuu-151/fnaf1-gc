@@ -1318,6 +1318,9 @@ void FnafGame::UpdatePowerOut(float deltaTime)
     default:    // silent darkness: the jumpscare comes on a 1-in-5 roll every 2 s, or after 20 s
         if (roll(2.0f, 5, 20.0f))
         {
+            // This death has its own frame in the original (#300/#301 jump to the XSCREAM one),
+            // but it amounts to what we already do: the lunge plays once, the static takes over,
+            // and the game over screen follows about 12 s after it began.
             StartJumpscare("freddy");
         }
         break;
