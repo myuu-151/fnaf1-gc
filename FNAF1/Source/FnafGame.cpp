@@ -622,6 +622,23 @@ void FnafGame::StartNight()
     mCameraFresh = true;
     mMapBlinkTime = 0.0f;
     mFlashTime = -1.0f;
+    mGlitchRoll = 1;
+    mGlitchTimer = 0.0f;
+    mVoiceRollTimer = 0.0f;
+
+    // From night 4 the 2B and 4B pictures flicker between three versions every 50 ms, so those
+    // stay in RAM instead of being read from the disc each time.
+    if (mNight >= 4)
+    {
+        for (const char* glitch : { "cam2b_bonnie", "cam2b_bonnie_glitch1", "cam2b_bonnie_glitch2",
+                                    "cam4b_chica", "cam4b_chica_glitch1", "cam4b_chica_glitch2" })
+        {
+            if (mImages.find(glitch) == mImages.end())
+            {
+                ReadDataFile(std::string("img/") + glitch + ".jpg", mImages[glitch]);
+            }
+        }
+    }
     mPotsTimer = 3.0f;
     mPirateSongTimer = 4.0f;
     mCircusTimer = 5.0f;
@@ -1810,9 +1827,32 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
         mHallucinationVisible = false;
     }
 
-    // #380: the voice goes quiet once the hallucination is over, unless Bonnie is on CAM 2B or Chica
-    // on CAM 4B (from night 4 those glitch the voice too).
-    if (mRobotVoiceOn && !mHallucination && !IsAt(mBonnie, Room::WestCorner) && !IsAt(mChica, Room::EastCorner))
+    // #381-#384: from night 4, Bonnie on CAM 2B or Chica on CAM 4B drives the voice: every 100 ms
+    // its channel is set to 1 + Random(5) x 5 with the cameras down, and to the much louder
+    // 1 + Random(5) x 20 while you watch that camera. Channel volume 100 is the mixer's 2.0.
+    const bool bonnieGlitching = IsAt(mBonnie, Room::WestCorner);
+    const bool chicaGlitching = IsAt(mChica, Room::EastCorner);
+    if (mNight >= 4 && (bonnieGlitching || chicaGlitching))
+    {
+        // Only two cases change it: cameras down (#381, #382), or watching that very camera
+        // (#383, #384). On any other camera the volume is left where it was.
+        const bool watched = viewing && ((bonnieGlitching && (Room)mCameraIndex == Room::WestCorner) ||
+                                         (chicaGlitching && (Room)mCameraIndex == Room::EastCorner));
+        mVoiceRollTimer += deltaTime;
+        if (mVoiceRollTimer >= 0.1f && (watched || !viewing))
+        {
+            mVoiceRollTimer -= 0.1f;
+            const int32_t channelVolume = 1 + (rand() % 5) * (watched ? 20 : 5);
+            if (!mRobotVoiceOn)
+            {
+                mRobotVoice.Start("snd/robotvoice.pcm", (uint32_t)mCounts["size_robotvoice"], true, 0.0f);
+                mRobotVoiceOn = true;
+            }
+            mRobotVoice.SetVolume(glm::min(2.0f, channelVolume * 0.024f));
+        }
+    }
+    // #380: the voice goes quiet once the hallucination is over and neither of them is there.
+    else if (mRobotVoiceOn && !mHallucination && !bonnieGlitching && !chicaGlitching)
     {
         mRobotVoice.Stop();
         mRobotVoiceOn = false;
@@ -1999,7 +2039,13 @@ std::string FnafGame::GetCameraImage(Room camera) const
     case Room::SupplyCloset: return bonnie ? "cam3_bonnie" : "cam3_empty";
     // Rare pictures on empty cameras, by the roll.
     case Room::WestCorner:
-        if (bonnie) return "cam2b_bonnie";
+        if (bonnie)
+        {
+            // From night 4 his picture glitches (#44-#47).
+            if (mNight >= 4 && mGlitchRoll >= 29) return "cam2b_bonnie_glitch2";
+            if (mNight >= 4 && mGlitchRoll >= 25) return "cam2b_bonnie_glitch1";
+            return "cam2b_bonnie";
+        }
         if (mYellowBear >= 1) return "cam2b_golden";   // his event is armed (or he's already been seen)
         return (pic < 2) ? "cam2b_rare_freddy" : "cam2b_empty";
     case Room::EastHall:
@@ -2008,7 +2054,13 @@ std::string FnafGame::GetCameraImage(Room camera) const
         if (pic == 100) return "cam4a_rare_itsme";
         return "cam4a_empty";
     case Room::EastCorner:
-        if (chica) return "cam4b_chica";
+        if (chica)
+        {
+            // From night 4 her picture glitches too (#56-#59).
+            if (mNight >= 4 && mGlitchRoll >= 29) return "cam4b_chica_glitch2";
+            if (mNight >= 4 && mGlitchRoll >= 25) return "cam4b_chica_glitch1";
+            return "cam4b_chica";
+        }
         if (pic >= 97)
         {
             // One of four newspaper clippings: 97, 98, 99 or 100.
@@ -2102,6 +2154,15 @@ void FnafGame::UpdateView(float deltaTime)
         mFlickerTimer += 0.1f;
         mHallLit = (rand() % 10) < 3;
         mLightDropout = (rand() % 10) == 0;
+    }
+
+    // The original's Random(30) + 1, re-rolled every 50 ms (#387): it picks the glitched pictures
+    // of Bonnie on CAM 2B and Chica on CAM 4B from night 4.
+    mGlitchTimer -= deltaTime;
+    if (mGlitchTimer <= 0.0f)
+    {
+        mGlitchTimer += 0.05f;
+        mGlitchRoll = (rand() % 30) + 1;
     }
 
     // Office, fan, doors and buttons

@@ -276,7 +276,11 @@ private:
     float mFoxyRunFrameTimer = 0.0f;
     int32_t mFoxyKnocks = 0;
     float mNightTime = 0.0f;
+    int32_t mNight = 1;             // which night is being played
     int32_t mHour = 0;
+    int32_t mGlitchRoll = 1;        // the original's 1-30, re-rolled every 50 ms (#387)
+    float mGlitchTimer = 0.0f;
+    float mVoiceRollTimer = 0.0f;   // robot voice volume roll, every 100 ms (#381-#384)
     float mPower = 100.0f;
     int32_t mUsage = 1;
     float mOfficePan = 0.5f;    // 0..1

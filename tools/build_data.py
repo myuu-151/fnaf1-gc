@@ -59,6 +59,10 @@ BACKGROUNDS = {
     "cam2a_dark": 43, "cam2a_empty": 44, "cam2a_bonnie": 206,     # (241/244/340 are Foxy running)
     "cam3_empty": 62, "cam3_bonnie": 190,
     "cam2b_empty": 0, "cam2b_bonnie": 188,
+    # From night 4, Bonnie on 2B and Chica on 4B flicker between their normal picture and two
+    # glitched ones (the original re-rolls 1-30 every 50 ms: 25-28 the first, 29+ the second).
+    "cam2b_bonnie_glitch1": 478, "cam2b_bonnie_glitch2": 479,
+    "cam4b_chica_glitch1": 476, "cam4b_chica_glitch2": 451,
     "cam4a_empty": 67, "cam4a_chica": 221, "cam4a_chica2": 226,
     "cam4b_empty": 49, "cam4b_chica": 220,
     # rare posters on empty cameras ("random for pic" in the original)
