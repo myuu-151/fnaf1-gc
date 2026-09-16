@@ -1,46 +1,7 @@
 # FNAF1 for GameCube
 
-A private, personal remake of Five Nights at Freddy's (all credit to Scott Cawthon) for the Nintendo GameCube, built on the [Octave](https://github.com/myuu-151/Octave-libogc) engine.
+A reimplementation of Five Nights at Freddy's (all credit to Scott Cawthon) for the Nintendo GameCube, built on the [Octave](https://github.com/myuu-151/Octave-libogc) engine.
 
-It isn't a port: the original is a Clickteam Fusion game with no source to recompile. Its images and sounds are converted for the console, and its logic is reimplemented in C++ to match the events decompiled from `Application.ccj` — the AI rolls, the timers, the camera picture odds and the sound levels.
-
-**Status:** Night 1, matched to those events. Runs in Dolphin and on a real GameCube.
-
-## Running
-
-- **Dolphin:** open `FNAF1.iso`.
-- **GameCube:** put `FNAF1.iso` on an SD card's root and start it from Swiss. With two SD adapters, use the card in serial port 2: that one mounts first, and the ISO has to be on it.
-
-The ISO is required; booting the DOL alone isn't supported.
-
-## Controls
-
-| Input | Action |
-|---|---|
-| Control stick | Look around the office |
-| L / R | Close or open the left / right door |
-| D-pad left / right | Left / right door light |
-| A | Raise or lower the camera tablet |
-| D-pad left / right (tablet up) | Switch camera |
-| B | Mute the phone call |
-| Z | Honk the Freddy poster's nose |
-| D-pad up / down, A, START (menus) | Choose and confirm |
-
-Debug keys during a night: **X** power out, **Y** Bonnie's jumpscare, **D-pad down** Chica's, **D-pad up** both at the doors, **START** skip to 6 AM, **C-stick down** Foxy's run, **C-stick up** Golden Freddy (his ending resets the console, as it closes the game in the original).
-
-## What's in
-
-- The office: panning, both doors and lights, the power meter and usage, and the clock to 6 AM
-- All 11 cameras with the map, static, camera switching and the tablet flip
-- Bonnie, Chica and Foxy with the original's night 1 behaviour, their jumpscares, and Freddy's after a power-out
-- The power-out: the music box, his face in the dark, and everything still moving while you sit there
-- Golden Freddy, the hallucination flashes, and the rare camera pictures at the original's odds
-- The phone call, the ambience, and the original's sound levels
-
-## Not yet
-
-- Nights 2–5, their phone calls, and Freddy roaming (he's inactive on night 1 in the original too)
-- Saving progress
 
 ## Building
 
