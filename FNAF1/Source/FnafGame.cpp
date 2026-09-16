@@ -47,9 +47,10 @@ static constexpr float kDoorSpeed = 5.0f;        // door animation, 1/seconds
 static constexpr float kTabletSpeed = 1.0f / 0.367f;
 static constexpr float kPanSpeed = 0.9f;         // office pan, screens/second
 static constexpr float kStaticSeconds = 0.25f;
-// The static's own animation runs at speed 99/100, i.e. a picture per 60 Hz tick. We step it once
-// per frame, which is as close as the console's 30 fps gets.
-static constexpr float kStaticFrameSeconds = 1.0f / 60.0f;
+// The static's own animation runs at speed 99/100, a picture per 60 Hz tick, but each picture is a
+// JPEG we decode: stepping it every frame costs a decode per frame whenever the cameras or the menu
+// are up, and looked no different on screen. It stays at 20 fps.
+static constexpr float kStaticFrameSeconds = 0.05f;
 static constexpr float kJumpFrameSeconds = 1.0f / 24.0f;
 static constexpr float kFanFrameSeconds = 1.0f / 59.4f;  // its animation speed 99, like Chica's jumpscare
 static constexpr uint64_t kLoadBudgetUs = 30000;  // loading work per frame
@@ -327,6 +328,7 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_newgame.rgx", &mMenuNewGameSprite);
     queueSprite("spr/menu_continue.rgx", &mMenuContinueSprite);
     queueSprite("spr/menu_sixth.rgx", &mMenuSixthSprite);
+    queueSprite("spr/menu_star.rgx", &mMenuStarSprite);
     queueSprite("spr/menu_nightword.rgx", &mMenuNightWordSprite);
     for (int32_t d = 0; d < 10; ++d)
     {
@@ -1536,7 +1538,23 @@ void FnafGame::UpdateAnimatronics(float deltaTime)
         // office picture actually shows her lit there (light on, cameras down, not a light dropout
         // step). It plays on channel 9 at volume 100, the mixer's maximum here.
         const Room door = a->mLeftSide ? Room::LeftDoor : Room::RightDoor;
-        const bool litInDoorway = a->mRoom == door && mDoors[side].mLight && !mLightDropout &&
+
+        // Both lights go out the moment she arrives at the doorway, and again when she leaves
+        // (#225/#226 and #258/#259, edge-triggered on her being there). So you can't hold a light
+        // on and watch her walk in: the light drops and you have to press it again. It only
+        // happens with the cameras down, and not while Foxy is at the door or Freddy is inside.
+        const bool atDoor = a->mRoom == door;
+        if (atDoor != a->mWasAtDoor)
+        {
+            a->mWasAtDoor = atDoor;
+            if (!mTabletUp && !mFoxyAtDoor && !mFreddyInOffice)
+            {
+                SetLight(true, false);
+                SetLight(false, false);
+            }
+        }
+
+        const bool litInDoorway = atDoor && mDoors[side].mLight && !mLightDropout &&
                                   !mTabletUp && mTabletProgress <= 0.0f;
         if (litInDoorway && !a->mSeenAtDoor)
         {
@@ -2011,7 +2029,23 @@ void FnafGame::StartJumpscare(const std::string& who)
 {
     AudioManager::StopAllSounds();
     StopStreams();
-    PlaySound("scream");
+
+    // Bonnie and Chica set two counters when they get you (#224, #230): one ticks down 10 frames
+    // to the scream (#227, #228) and the other 40 frames to the death screen (#261, #262). So the
+    // scream lands about 150 ms after the picture, and the cut comes at a flat 0.67 s however long
+    // the animation is. Foxy screams immediately (#322), and Freddy's office attack waits for his
+    // animation to reach picture 7 (#408).
+    // The scream's countdown is kept, but not the 40-frame one: the original counts game ticks at
+    // 60 fps with its pictures already in memory, while ours are read from the disc and decoded, so
+    // a fixed 0.67 s of wall clock cuts the animation off part-way instead of landing on its end.
+    // These two therefore still cut when their animation has played out, as the other two do.
+    const bool counted = (who == "bonnie" || who == "chica");
+    mJumpScreamDelay = counted ? 10.0f / 60.0f : ((who == "freddyoffice") ? 7.0f / 30.0f : -1.0f);
+    mJumpCutTime = -1.0f;
+    if (mJumpScreamDelay < 0.0f)
+    {
+        PlaySound("scream");
+    }
 
     mState = State::Jumpscare;
     mTabletUp = false;
@@ -2060,6 +2094,25 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     else if (mJumpWho == "foxy")    fps = 30.0f;
     else if (mJumpWho == "freddy")  fps = 36.0f;
     else if (mJumpWho == "freddyoffice") fps = 30.0f;   // the office attack's animation speed 50
+    // The scream on its own countdown, and the cut to the death screen on another.
+    if (mJumpScreamDelay > 0.0f)
+    {
+        mJumpScreamDelay -= deltaTime;
+        if (mJumpScreamDelay <= 0.0f)
+        {
+            PlaySound("scream");
+        }
+    }
+    if (mJumpCutTime > 0.0f)
+    {
+        mJumpCutTime -= deltaTime;
+        if (mJumpCutTime <= 0.0f)
+        {
+            EndJumpscare();
+            return;
+        }
+    }
+
     const float frameSeconds = 1.0f / fps;
     if (mJumpTimer >= frameSeconds && mJumpFrame + 1 < frames)
     {
@@ -2074,22 +2127,30 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     }
     else if (mJumpFrame + 1 >= frames && mJumpTimer > 0.6f)
     {
-        // Game over: full-screen static with its sound, then the game over screen.
-        LogAnimStats(("jumpscare " + mJumpWho).c_str());
-        AnimPreloadStop();
-        mJump->SetVisible(false);
-        AudioManager::StopAllSounds();      // the scream ends with the animation
-        mState = State::GameOver;
-        mGameOverTimer = 0.0f;
-        mGameOverRollTimer = 0.0f;
-        mGameOverRare = false;
-        mMenuShown.clear();
-        ShowMenuWidgets(false, false, false);
-        mMenuBlack->SetVisible(true);
-        mMenuStaticQuad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-        mMenuStaticQuad->SetVisible(true);
-        mJingle.Start("snd/deadstatic.pcm", (uint32_t)mCounts["size_deadstatic"], false, 1.0f);
+        // The ones without a countdown (Foxy, Freddy) cut when their animation has played out.
+        EndJumpscare();
     }
+}
+
+void FnafGame::EndJumpscare()
+{
+    // Game over: full-screen static with its sound, then the game over screen.
+    LogAnimStats(("jumpscare " + mJumpWho).c_str());
+    AnimPreloadStop();
+    mJumpScreamDelay = -1.0f;
+    mJumpCutTime = -1.0f;
+    mJump->SetVisible(false);
+    AudioManager::StopAllSounds();      // the scream ends with the animation
+    mState = State::GameOver;
+    mGameOverTimer = 0.0f;
+    mGameOverRollTimer = 0.0f;
+    mGameOverRare = false;
+    mMenuShown.clear();
+    ShowMenuWidgets(false, false, false);
+    mMenuBlack->SetVisible(true);
+    mMenuStaticQuad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    mMenuStaticQuad->SetVisible(true);
+    mJingle.Start("snd/deadstatic.pcm", (uint32_t)mCounts["size_deadstatic"], false, 1.0f);
 }
 
 void FnafGame::LoadGoldenSprite()
@@ -2709,6 +2770,11 @@ void FnafGame::BuildMenuUi()
     mMenuNewGame = mRoot->CreateChild<Quad>("MenuNewGame");
     mMenuContinue = mRoot->CreateChild<Quad>("MenuContinue");
     mMenuSixth = mRoot->CreateChild<Quad>("MenuSixth");
+    for (Quad*& star : mMenuStars)
+    {
+        star = mRoot->CreateChild<Quad>("MenuStar");
+        star->SetVisible(false);
+    }
     mMenuNightWord = mRoot->CreateChild<Quad>("MenuNightWord");
     mMenuNightDigit = mRoot->CreateChild<Quad>("MenuNightDigit");
     mMenuArrows = mRoot->CreateChild<Quad>("MenuArrows");
@@ -2761,6 +2827,14 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
     if (mMenuSixth != nullptr)
     {
         mMenuSixth->SetVisible(menu && mBeatGame);
+    }
+
+    // A star for each of the two the original tracks separately: beating night 5 lights the first
+    // (alongside the 6th night line), beating night 6 the second (#44-#47).
+    if (mMenuStars[0] != nullptr)
+    {
+        mMenuStars[0]->SetVisible(menu && mBeatGame);
+        mMenuStars[1]->SetVisible(menu && mBeatSix);
     }
 
     // The night readout only belongs to the menu, and only while Continue is picked (its #50/#51).
@@ -2818,9 +2892,12 @@ void FnafGame::EnterMenu()
     StopStreams();
 
     mState = State::Menu;
-    mMenuSelection = 0;
+    // Continue is picked for you once there's progress to continue (#42/#43).
+    mMenuSelection = (mSavedNight > 1) ? 1 : 0;
     mMenuTimer = 0.0f;
     mMenuFrameTimer = 0.0f;
+    mMenuChosen = -1;
+    mMenuChosenTime = 0.0f;
     mTitleGlitchFrame = 0;
     mTitleGlitchFrameTimer = 0.0f;
     mTitleGlitchRollTimer = 0.0f;
@@ -2838,6 +2915,9 @@ void FnafGame::EnterMenu()
     // Its object sits at (285, 571) with a (113, 22) hotspot, so its top-left is (172, 549) —
     // the same left edge as New Game and Continue.
     PlaceSprite(mMenuSixth, mMenuSixthSprite, 172.0f, 549.0f);
+    // Their objects sit at (200, 338) and (277, 338) with a (28, 27) hotspot.
+    PlaceSprite(mMenuStars[0], mMenuStarSprite, 172.0f, 311.0f);
+    PlaceSprite(mMenuStars[1], mMenuStarSprite, 249.0f, 311.0f);
     PlaceNightReadout();
     PlaceSprite(mMenuCopyright, mMenuCopyrightSprite, 1260.0f - mMenuCopyrightSprite.mWidth * 2.0f, 690.0f);
     ShowMenuWidgets(true, false, false);
@@ -3016,9 +3096,26 @@ void FnafGame::UpdateMenu(float deltaTime)
         static const float kArrowY[] = { 402.0f, 474.0f, 553.0f };
         PlaceSprite(mMenuArrows, mMenuArrowsSprite, 95.0f, kArrowY[glm::clamp(mMenuSelection, 0, 2)]);
 
-        if (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))
+        // Choosing an option doesn't act at once: the original counts 20 frames first (#36-#40),
+        // about a third of a second, with the blip playing over it.
+        if ((Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START)) && mMenuChosen < 0)
         {
-            if (mMenuSelection == 0)
+            mMenuChosen = mMenuSelection;
+            mMenuChosenTime = 0.0f;
+            PlaySound("blip");
+        }
+
+        if (mMenuChosen >= 0)
+        {
+            mMenuChosenTime += deltaTime;
+            if (mMenuChosenTime < 21.0f / 60.0f)
+            {
+                break;
+            }
+
+            const int32_t chosen = mMenuChosen;
+            mMenuChosen = -1;
+            if (chosen == 0)
             {
                 // New Game: back to night 1 (the original rewrites its saved level), after the
                 // help-wanted ad.
@@ -3028,6 +3125,8 @@ void FnafGame::UpdateMenu(float deltaTime)
                 {
                     played = false;     // New Game clears the original's "play voice" counters
                 }
+                // (New Game rewrites the saved level but leaves both stars alone: its #23 writes
+                // "level" only, and #48's hold-to-wipe is what clears "beatgame" and "beat6".)
                 SaveProgress();
                 StopStreams();
                 mState = State::Newspaper;
@@ -3038,7 +3137,7 @@ void FnafGame::UpdateMenu(float deltaTime)
             }
             else
             {
-                mNight = (mMenuSelection == 2) ? 6 : mSavedNight;
+                mNight = (chosen == 2) ? 6 : mSavedNight;
                 StartNightIntro();
             }
         }
@@ -3085,7 +3184,11 @@ void FnafGame::LoadProgress()
         FILE* file = fopen(path, "rb");
         int32_t night = 0;
         int32_t beat = 0;
-        const bool read = file != nullptr && fscanf(file, "%d %d", &night, &beat) == 2;
+        int32_t beatSix = 0;
+        // A file from before the second star was tracked has two numbers; treat its missing third
+        // as zero rather than refusing the whole save.
+        const int32_t fields = (file != nullptr) ? fscanf(file, "%d %d %d", &night, &beat, &beatSix) : 0;
+        const bool read = fields >= 2;
         if (file != nullptr)
         {
             fclose(file);
@@ -3098,7 +3201,9 @@ void FnafGame::LoadProgress()
             // only reachable from its own menu entry.
             mSavedNight = glm::clamp(night, 1, 5);
             mBeatGame = beat != 0;
-            OctLog("FNAF1: progress from %s: night %d, beaten %d", path, mSavedNight, (int)mBeatGame);
+            mBeatSix = beatSix != 0;
+            OctLog("FNAF1: progress from %s: night %d, beaten %d, six %d", path, mSavedNight,
+                   (int)mBeatGame, (int)mBeatSix);
             return;
         }
     }
@@ -3115,13 +3220,15 @@ void FnafGame::SaveProgress()
     {
         mSavedNight = mNight;
     }
-    mBeatGame = mBeatGame || mNight >= 6;
+    mBeatGame = mBeatGame || mNight >= 6;    // its "beatgame", written by the night 5 ending
+    mBeatSix = mBeatSix || mNight >= 7;      // its "beat6", written when night 6 is finished
 
     for (const char* path : kSavePaths)
     {
         OctLockFileIo();
         FILE* file = fopen(path, "wb");
-        const bool wrote = file != nullptr && fprintf(file, "%d %d\n", mSavedNight, mBeatGame ? 1 : 0) > 0;
+        const bool wrote = file != nullptr && fprintf(file, "%d %d %d\n", mSavedNight,
+                                                      mBeatGame ? 1 : 0, mBeatSix ? 1 : 0) > 0;
         if (file != nullptr)
         {
             fclose(file);
@@ -3130,7 +3237,8 @@ void FnafGame::SaveProgress()
 
         if (wrote)
         {
-            OctLog("FNAF1: progress saved to %s: night %d, beaten %d", path, mSavedNight, (int)mBeatGame);
+            OctLog("FNAF1: progress saved to %s: night %d, beaten %d, six %d", path, mSavedNight,
+                   (int)mBeatGame, (int)mBeatSix);
             return;
         }
     }
@@ -3214,8 +3322,10 @@ void FnafGame::UpdateGameOver(float deltaTime)
         mGameOverRare = (rand() % 10000) == 1;
     }
 
+    // Its frame has no way past it: only the 10 s timer and the rare roll above, so a button press
+    // does nothing here.
     const float shown = mGameOverTimer - kGameOverStaticSeconds;
-    if (shown >= kGameOverSeconds || (shown > 1.0f && (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))))
+    if (shown >= kGameOverSeconds)
     {
         if (mGameOverRare)
         {

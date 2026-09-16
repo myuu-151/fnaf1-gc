@@ -64,6 +64,7 @@ private:
         float mMoveInterval = 5.0f;
         float mOfficeTimer = 0.0f;
         bool mSeenAtDoor = false;
+        bool mWasAtDoor = false;        // for the edge that cuts the lights when she arrives or leaves
         int32_t mPose = 1;              // 1 or 2: which picture of her some cameras show (re-rolled on every move roll)
         bool mAttackArmed = false;      // inside, and the cameras have been up since: lowering them starts the jumpscare
         float mTabletUpInside = 0.0f;   // time the cameras have been up while she's inside (30 s pulls them down)
@@ -124,6 +125,7 @@ private:
     void UpdateAnimatronics(float deltaTime);
     void UpdateTablet(float deltaTime);
     void UpdateJumpscare(float deltaTime);
+    void EndJumpscare();
     void UpdateView(float deltaTime);
     void UpdateTabletUi(float deltaTime, bool cameraOn);
     void StartCameraFlash();
@@ -280,7 +282,9 @@ private:
     Sprite mMenuArrowsSprite;
     Sprite mMenuCopyrightSprite;
     std::string mMenuShown;
-    int32_t mMenuSelection = 0;         // 0 = New Game, 1 = Continue
+    int32_t mMenuSelection = 0;         // 0 = New Game, 1 = Continue, 2 = 6th Night
+    int32_t mMenuChosen = -1;           // the option being confirmed, once its 20 frames are up
+    float mMenuChosenTime = 0.0f;
     float mMenuTimer = 0.0f;
     float mMenuFrameTimer = 0.0f;
     Text* mGameOverLabel = nullptr;
@@ -323,7 +327,10 @@ private:
     int32_t mNight = 1;             // which night is being played
     int32_t mSavedNight = 1;        // what Continue starts (the original's "level" in its .ini)
     bool mCallPlayed[7] = {};       // the original's "play voice N": a retried night has no call again
-    bool mBeatGame = false;         // night 5 done: the 6th night is offered on the menu
+    bool mBeatGame = false;         // night 5 done: the 6th night is offered, and the first star
+    bool mBeatSix = false;          // night 6 done: the second star (the original's "beat6")
+    Quad* mMenuStars[2] = {};
+    Sprite mMenuStarSprite;
     float mEndingTimer = 0.0f;      // the paycheck screen's 15 s
     std::string mEndingImage;
     int32_t mHour = 0;
@@ -378,6 +385,10 @@ private:
     std::string mJumpWho;
     int32_t mJumpFrame = 0;
     float mJumpTimer = 0.0f;
+    // Bonnie's and Chica's attacks run on two countdowns rather than the animation's length: the
+    // scream after 10 frames and the cut to the death screen after 40.
+    float mJumpScreamDelay = -1.0f;
+    float mJumpCutTime = -1.0f;
 
     // Golden Freddy ("yellow bear" in the original). mYellowBear is its alterable value A:
     // 0 idle, 1 armed (his poster is on CAM 2B), 2 seen (he sits in the office once the cameras go down).
