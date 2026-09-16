@@ -65,6 +65,8 @@ private:
         float mOfficeTimer = 0.0f;
         bool mSeenAtDoor = false;
         bool mWasAtDoor = false;        // for the edge that cuts the lights when she arrives or leaves
+        float mMoveFlash = 0.0f;        // 10 frames after a move roll, during which being on the
+                                        // watched camera keeps re-cutting its feed
         int32_t mPose = 1;              // 1 or 2: which picture of her some cameras show (re-rolled on every move roll)
         bool mAttackArmed = false;      // inside, and the cameras have been up since: lowering them starts the jumpscare
         float mTabletUpInside = 0.0f;   // time the cameras have been up while she's inside (30 s pulls them down)
@@ -108,6 +110,7 @@ private:
     void EnterMenu();
     void UpdateMenu(float deltaTime);
     void UpdateTitleGlitch(float deltaTime);
+    void UpdateBlipFlash(float deltaTime);
     void PlaceNightReadout();
     void StartNightIntro();
     void ShowMenuWidgets(bool menu, bool newspaper, bool intro);
@@ -131,7 +134,8 @@ private:
     void StartCameraFlash();
     void UpdateHud();
 
-    void MoveAnimatronic(Animatronic& a);
+    bool MoveAnimatronic(Animatronic& a);   // false when no rule matches, so the move stays claimed
+    bool CutFeedIfWatched(Room room);
     void UpdateFreddy(float deltaTime);
     bool MoveFreddy();      // false when his room's conditions block it, so the move stays pending
     void UpdateFoxy(float deltaTime);
@@ -273,6 +277,11 @@ private:
     Quad* mTitleGlitchBands[3] = {};
     Quad* mTitleScanBar = nullptr;      // the white band crawling down the title (~20 s a pass)
     float mTitleScanTime = 0.0f;
+    // The "what day" screen's blip flash: white bands over the night's name, looping all the while
+    // it is up. Two quads is enough — no frame of it has more than two bands.
+    Quad* mBlipBands[2] = {};
+    int32_t mBlipFrame = 0;
+    float mBlipFrameTimer = 0.0f;
     int32_t mTitleGlitchFrame = 0;
     float mTitleGlitchFrameTimer = 0.0f;
     float mTitleGlitchRollTimer = 0.0f;
@@ -340,6 +349,8 @@ private:
     float mPower = 100.0f;
     int32_t mUsage = 1;
     float mPowerDrainTimer = 0.0f;  // the night's extra drain (#341-#344)
+    bool mHudRevealed = false;      // the power and usage readout appears on the first camera raise
+    int32_t mMoveWho = 0;           // the original's shared "move who?": 1 Bonnie, 2 Chica, 0 none
     float mOfficePan = 0.5f;    // 0..1
     bool mTabletUp = false;
     float mTabletProgress = 0.0f;
@@ -397,6 +408,8 @@ private:
     bool mYellowBearShown = false;
     bool mYellowBearWasShown = false;   // for the original's "only once" on showing him
     float mYellowBearRollTimer = 0.0f;  // every 1 s, a 1 in 100000 chance to arm him
+    bool mYellowBearArmed = false;      // that roll is ONCE a night, so it can't come up twice
+    bool mYellowBearHallucinated = false;   // and so is the hallucination his appearance starts
     Quad* mGoldenQuad = nullptr;
     Sprite mGoldenSprite;
 

@@ -20,6 +20,45 @@
 #include <ogc/system.h>
 #endif
 
+// ---- Deliberate departures from the original -------------------------------------------------
+//
+// This file is written against the original's decoded events, so anything that doesn't match them
+// is either a bug or a choice. The choices are listed here and tagged "PORT:" where they happen,
+// so a future reading of the events doesn't turn them back into "fixes".
+//
+//  1. Input is a controller, not a mouse. The office pans with the stick instead of the cursor's
+//     screen zones, and buttons are pressed rather than clicked. The door and light buttons also
+//     have no shared click cooldown (the original locks all four for ~167 ms): the instant
+//     response was preferred.
+//  2. Some of the original's lettering is drawn with the game's own text: the clock and night on
+//     the HUD, the camera name, the 6 AM clock and the night intro. Where its pictures are used
+//     they are exact (the menu, "Night N" beside Continue, the 6th night).
+//  3. Pictures are JPEG at a lower resolution than the original's, read from the disc and decoded
+//     as they are shown, so anything the original does per 60 Hz tick has to earn its cost here:
+//       - the camera and menu static animate at 20 fps, not 60;
+//       - the hall-light flicker is rolled every 100 ms rather than every frame, and its two
+//         effects (the office dropout, CAM 2A lit) are rolled separately where the original drives
+//         both from one value;
+//       - Bonnie's and Chica's attacks cut to the death screen when their animation has played
+//         out, not on the original's flat 40-frame timer, which would truncate it here;
+//       - the door animations keep every other picture (9 of 16), which is more than a 0.2 s
+//         close can show at this frame rate.
+//  4. Sound volumes are tuned for Octave's mixer, not converted from the original's channel
+//     volumes. Related: only one garble sound plays when someone moves on the watched camera
+//     (the original re-fires them for ~10 frames), and the robot voice is started and stopped
+//     rather than left looping all night at volume 0, because a stream here holds one of a small
+//     number of slots.
+//  5. Effects kept because they were liked, though the original has no such thing: the burst of
+//     solid static on a camera switch, and the title screen's static looping instead of playing
+//     once.
+//  6. Nights 1-6 only. There is no custom night, so its ending (the plain $120.00 cheque) is
+//     never shown, and the menu has no seventh option.
+//  7. Golden Freddy's ending resets the console, where the original closes the game.
+//  8. Foxy's arrival snaps the view to the left door; in the original it drifts there because the
+//     cursor is sitting on the tablet bar, which a controller has no equivalent for.
+//
+// ----------------------------------------------------------------------------------------------
+
 // Layout of the original 1600x720 office, in its own pixels.
 static constexpr float kOfficeWidth = 1600.0f;
 static constexpr float kOfficeHeight = 720.0f;
@@ -45,11 +84,15 @@ static constexpr float kHourSeconds = 89.0f;
 static constexpr float kDoorSpeed = 5.0f;        // door animation, 1/seconds
 // The flip panel's 11 frames run at animation speed 50 (30 fps), so a flip takes 0.367 s.
 static constexpr float kTabletSpeed = 1.0f / 0.367f;
+// PORT: the stick drives the pan. Full deflection matches the original's fast mouse zones (5 px a
+// frame across its 320 px of travel) and a light push its slow ones (2 px a frame).
 static constexpr float kPanSpeed = 0.9f;         // office pan, screens/second
+// PORT: the original never makes its static solid — a switch only flashes the white bands. This
+// quarter second of opaque static is ours, and kept because it was liked.
 static constexpr float kStaticSeconds = 0.25f;
-// The static's own animation runs at speed 99/100, a picture per 60 Hz tick, but each picture is a
-// JPEG we decode: stepping it every frame costs a decode per frame whenever the cameras or the menu
-// are up, and looked no different on screen. It stays at 20 fps.
+// PORT: the static's own animation runs at speed 99/100, a picture per 60 Hz tick, but each picture
+// is a JPEG we decode: stepping it every frame costs a decode per frame whenever the cameras or the
+// menu are up, and looked no different on screen. It stays at 20 fps.
 static constexpr float kStaticFrameSeconds = 0.05f;
 static constexpr float kJumpFrameSeconds = 1.0f / 24.0f;
 static constexpr float kFanFrameSeconds = 1.0f / 59.4f;  // its animation speed 99, like Chica's jumpscare
@@ -129,7 +172,7 @@ static constexpr float kMenuNightDigitH = 20.0f;    // 17 padded
 // the pixel size the original gives them. Drawing them at one source pixel per screen pixel was
 // tried and looks too big next to Continue, since the rest of the menu is still halved.)
 static constexpr float kNewspaperSeconds = 5.0f;    // help-wanted ad after New Game
-static constexpr float kNightIntroSeconds = 2.5f;   // "12:00 AM / 1st Night"
+static constexpr float kNightIntroSeconds = 131.0f / 60.0f;   // "12:00 AM / 1st Night": its 130-frame count
 static constexpr float kGameOverStaticSeconds = 10.8f;  // static before the game over screen (the static sound's length)
 static constexpr float kGameOverSeconds = 10.0f;        // game over screen, then the menu
 
@@ -589,6 +632,9 @@ void FnafGame::BuildUi()
     mTimeText->SetHorizontalJustification(Justification::Right);
     mNightText = makeText("Night", mScreenWidth - 260.0f, 50.0f, 236.0f, 30.0f, 18.0f);
     mNightText->SetHorizontalJustification(Justification::Right);
+    // PORT: the clock, night, power, usage and camera name are the game's own text. The original
+    // draws them with picture fonts and a digit counter, which are used where they were worth
+    // converting (the menu, "Night N" beside Continue) but not for the whole HUD.
     mPowerText = makeText("Power", 24.0f, mScreenHeight - 80.0f, 300.0f, 30.0f, 20.0f);
     mUsageText = makeText("Usage", 24.0f, mScreenHeight - 50.0f, 300.0f, 30.0f, 20.0f);
 
@@ -753,6 +799,10 @@ void FnafGame::StartNight()
     mYellowBearShown = false;
     mYellowBearWasShown = false;
     mYellowBearRollTimer = 0.0f;
+    mYellowBearArmed = false;
+    mYellowBearHallucinated = false;
+    mHudRevealed = false;
+    mMoveWho = 0;
     mHallucination = false;
     mHallucinationTime = 0.0f;
     mHallucinationStepTimer = 0.0f;
@@ -1387,6 +1437,8 @@ void FnafGame::UpdateInput(float deltaTime)
     }
 
     // Doors: L / R. Lights: D-pad left / right.
+    // PORT: no click cooldown. The original locks all four buttons for 10 frames after any press
+    // (#94); ours respond instantly, which was preferred over matching it.
     for (int32_t side = 0; side < 2; ++side)
     {
         // (Foxy at the left door hides the door's *graphic* in the original (#327), not its button:
@@ -1428,6 +1480,7 @@ void FnafGame::RaiseTablet()
 
     mTabletUp = true;
     mTabletUpTime = 0.0f;
+    mHudRevealed = true;    // the power and usage displays are shown by the first raise (#5)
     PlaySound("camup");
     // Cameras open: the original plays the MiniDV tape sound (stereo, full volume) on its own
     // channel and turns the fan's channel down (to 10, from 25).
@@ -1507,6 +1560,19 @@ void FnafGame::UpdateAnimatronics(float deltaTime)
     {
         const int32_t side = a->mLeftSide ? 0 : 1;
 
+        // For the 10 frames after a successful move roll, every frame she spends on the camera
+        // you're watching sets the blackout to 300 frames again (#193/#194). So the feed stays
+        // cut for 5 s measured from the last of those frames, not the first.
+        if (a->mMoveFlash > 0.0f)
+        {
+            a->mMoveFlash -= deltaTime;
+            const bool cameraOn = mTabletUp && mTabletProgress >= 1.0f;
+            if (cameraOn && a->mRoom == (Room)mCameraIndex)
+            {
+                mCameraCutTimer = 5.0f;
+            }
+        }
+
         if (a->mRoom == Room::Office)
         {
             // Inside ("got you"), as in the original: her side's light goes out, and nothing
@@ -1562,14 +1628,33 @@ void FnafGame::UpdateAnimatronics(float deltaTime)
             PlaySound("windowscare", false, 2.0f);
         }
 
+        // The roll doesn't move her itself: it claims the original's one shared "move who?" slot
+        // (#187, #188), and the move rules consume it. Chica's roll runs after Bonnie's, so when
+        // both come up on the same tick hers overwrites his and his move is lost — while the
+        // camera cut and the pose re-roll he already triggered still stand (#191, #192).
         a->mMoveTimer += deltaTime;
         if (a->mMoveTimer >= a->mMoveInterval)
         {
             a->mMoveTimer -= a->mMoveInterval;
             if ((rand() % 20) + 1 <= GetAi(*a))
             {
-                MoveAnimatronic(*a);
+                mMoveWho = a->mLeftSide ? 1 : 2;
+                a->mMoveFlash = 10.0f / 60.0f;
+                a->mPose = (rand() % 2) + 1;
+                CutFeedIfWatched(a->mRoom);
             }
+        }
+    }
+
+    // A claimed move waits until one of her rules matches, rather than being spent on the frame it
+    // was rolled: she may be in the office, where no rule covers her, or standing at a doorway
+    // while the door is still moving, which the rules read as neither open nor shut.
+    if (mMoveWho != 0)
+    {
+        Animatronic& mover = (mMoveWho == 1) ? mBonnie : mChica;
+        if (MoveAnimatronic(mover))
+        {
+            mMoveWho = 0;
         }
     }
 }
@@ -1584,7 +1669,7 @@ const char* FnafGame::GetCallFile() const
     case 3:  return "call3";
     case 4:  return "call4";
     case 5:  return "call5";
-    default: return nullptr;
+    default: return nullptr;    // PORT: night 6 has none here either, and there is no custom night
     }
 }
 
@@ -1770,33 +1855,49 @@ bool FnafGame::MoveFreddy()
     return true;
 }
 
-void FnafGame::MoveAnimatronic(Animatronic& a)
+// Feed cut when someone moves on the camera you're watching: the picture is hidden for 300 frames
+// (only the faint static shows), with one of the four garble sounds and the same white bands a
+// camera switch flashes (#193-#195, #218-#221).
+bool FnafGame::CutFeedIfWatched(Room room)
 {
+    const bool cameraOn = mTabletUp && mTabletProgress >= 1.0f;
+    if (cameraOn && room == (Room)mCameraIndex)
+    {
+        mCameraCutTimer = 5.0f;
+        StartCameraFlash();
+        // PORT: one sound. The original re-rolls and re-fires these every frame for ~10 frames
+        // while she is on the watched camera; ten overlapping sounds is voice pressure here for
+        // little audible gain.
+        // Random(4) + 1: 1 plays COMPUTER_DIGITAL, 2-4 play garble1-3.
+        const int32_t roll = (rand() % 4) + 1;
+        static const char* kMoveSounds[] = { "camhum", "garble1", "garble2", "garble3" };
+        PlaySound(kMoveSounds[roll - 1], false, 0.7f);
+        return true;
+    }
+    return false;
+}
+
+bool FnafGame::MoveAnimatronic(Animatronic& a)
+{
+    // Nothing covers her once she's inside, so a move claimed while she's in the office stays
+    // claimed — as the original's counter does — until she takes you or the other one's roll
+    // takes the slot from her.
+    if (a.mRoom == Room::Office)
+    {
+        return false;
+    }
+
+    // At a doorway her rules test the door as fully open or fully shut (#213, #214); while it is
+    // still moving neither matches, so the move waits rather than being spent.
+    const Room doorRoom = a.mLeftSide ? Room::LeftDoor : Room::RightDoor;
+    const Door& herDoor = mDoors[a.mLeftSide ? 0 : 1];
+    if (a.mRoom == doorRoom && herDoor.mProgress != (herDoor.mClosed ? 1.0f : 0.0f))
+    {
+        return false;
+    }
+
     const bool coin = (rand() & 1) != 0;
     const Room before = a.mRoom;
-
-    // Feed cut when someone moves on the camera you're watching. In the original a successful move
-    // roll sets a 10-frame flag before the move events run, and the camera check tests where she is:
-    // her old spot on that frame (even if the move is then blocked), her new one on the next frames.
-    // It hides the picture for 300 frames at 60 fps (only the faint static shows), keeps counting
-    // on other cameras and with the tablet down, and brings the picture straight back.
-    auto cutFeedIfWatched = [this](Room room)
-    {
-        const bool cameraOn = mTabletUp && mTabletProgress >= 1.0f;
-        if (cameraOn && room == (Room)mCameraIndex)
-        {
-            mCameraCutTimer = 5.0f;
-            StartCameraFlash();     // the original flashes the same white bands when someone moves (#195)
-            // Random(4) + 1: 1 plays COMPUTER_DIGITAL, 2-4 play garble1-3.
-            const int32_t roll = (rand() % 4) + 1;
-            static const char* kMoveSounds[] = { "camhum", "garble1", "garble2", "garble3" };
-            PlaySound(kMoveSounds[roll - 1], false, 0.7f);
-            return true;
-        }
-        return false;
-    };
-    const bool cutOnLeaving = cutFeedIfWatched(before);
-    a.mPose = (rand() % 2) + 1;     // the original re-rolls her camera pose on every move roll
 
     if (a.mLeftSide)
     {
@@ -1832,11 +1933,8 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         a.mSeenAtDoor = false;
         a.mOfficeTimer = 0.0f;
 
-        // Arriving on the camera you're watching (leaving it was checked above).
-        if (!cutOnLeaving)
-        {
-            cutFeedIfWatched(a.mRoom);
-        }
+        // Arriving on the camera you're watching; leaving one was already cut when the roll came up.
+        CutFeedIfWatched(a.mRoom);
         // Footsteps ("deep steps"): the original plays them on every move except getting in, at a
         // channel volume set by the room she left (10 far away .. 40 close), and mutes that
         // channel while you watch the camera she's on. Channel volume 25 is our 0.6 (the fan).
@@ -1866,6 +1964,8 @@ void FnafGame::MoveAnimatronic(Animatronic& a)
         a.mTabletUpInside = 0.0f;
         LogDebug("FNAF1: %s moved to room %d", a.mName, (int)a.mRoom);
     }
+
+    return true;
 }
 
 void FnafGame::UpdateFoxy(float deltaTime)
@@ -1885,8 +1985,10 @@ void FnafGame::UpdateFoxy(float deltaTime)
             SetLight(true, false);
             SetLight(false, false);
         }
-        // (No snap to the door here: if the door is shut he only bangs on it and the view should
-        // stay where you left it. The lunge does its own snap, in UpdateJumpscare.)
+        // PORT: his lunge snaps the view to the left door (in UpdateJumpscare). The original drifts
+        // there instead, because the cursor is left sitting on the tablet bar inside a pan zone —
+        // a controller has no equivalent. No snap here: a shut door only gets banged on, and the
+        // view should stay where you left it.
         const Door& door = mDoors[0];
         if (mTabletProgress > 0.0f || door.mProgress != (door.mClosed ? 1.0f : 0.0f))
         {
@@ -2035,7 +2137,7 @@ void FnafGame::StartJumpscare(const std::string& who)
     // scream lands about 150 ms after the picture, and the cut comes at a flat 0.67 s however long
     // the animation is. Foxy screams immediately (#322), and Freddy's office attack waits for his
     // animation to reach picture 7 (#408).
-    // The scream's countdown is kept, but not the 40-frame one: the original counts game ticks at
+    // PORT: the scream's countdown is kept, but not the 40-frame one: the original counts game ticks at
     // 60 fps with its pictures already in memory, while ours are read from the disc and decoded, so
     // a fixed 0.67 s of wall clock cuts the animation off part-way instead of landing on its end.
     // These two therefore still cut when their animation has played out, as the other two do.
@@ -2116,8 +2218,9 @@ void FnafGame::UpdateJumpscare(float deltaTime)
     const float frameSeconds = 1.0f / fps;
     if (mJumpTimer >= frameSeconds && mJumpFrame + 1 < frames)
     {
-        // At most one picture per update, like the original's animations (one step per game tick):
-        // a slow frame load delays the next picture instead of skipping one, so every frame shows.
+        // PORT: at most one picture per update. These frames are read from the disc and decoded as
+        // they are shown, so a slow one delays the next picture rather than being skipped — every
+        // picture is seen, and an animation takes as long as the reads take.
         mJumpTimer = glm::min(mJumpTimer - frameSeconds, frameSeconds);
         mJumpFrame++;
         char name[64];
@@ -2248,6 +2351,9 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
             mRobotVoice.SetVolume(glm::min(2.0f, channelVolume * 0.024f));
         }
     }
+    // PORT: the voice is started and stopped. The original starts it looping at the beginning of
+    // the night at volume 0 and only ever moves the volume (#14), so it is always playing; a stream
+    // here would hold one of a small number of slots all night for something heard once.
     // #380: the voice goes quiet once the hallucination is over and neither of them is there.
     else if (mRobotVoiceOn && !mHallucination && !bonnieGlitching && !chicaGlitching)
     {
@@ -2293,24 +2399,32 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
         mYellowBear = 0;
     }
 
-    // #423: showing him starts a hallucination.
-    if (mYellowBearShown && !mYellowBearWasShown)
+    // #423: showing him starts a hallucination, and that event is ONCE, so a second appearance
+    // doesn't start another.
+    if (mYellowBearShown && !mYellowBearWasShown && !mYellowBearHallucinated)
     {
+        mYellowBearHallucinated = true;
         mHallucination = true;
         OctLog("FNAF1: golden freddy in the office");
     }
     mYellowBearWasShown = mYellowBearShown;
 
-    // #424: every second, a 1 in 100000 chance to arm him.
-    mYellowBearRollTimer += deltaTime;
-    if (mYellowBearRollTimer >= 1.0f)
+    // #424: every second, a 1 in 100000 chance to arm him — but the event is ONCE, so once it has
+    // come up it can't again. Raising the cameras on him (#422) therefore ends him for the night
+    // rather than putting him back in the pool.
+    if (!mYellowBearArmed)
     {
-        mYellowBearRollTimer -= 1.0f;
-        if ((rand() % 100000) == 1)
+        mYellowBearRollTimer += deltaTime;
+        if (mYellowBearRollTimer >= 1.0f)
         {
-            mYellowBear = 1;
-            LoadGoldenSprite();
-            OctLog("FNAF1: golden freddy armed");
+            mYellowBearRollTimer -= 1.0f;
+            if ((rand() % 100000) == 1)
+            {
+                mYellowBearArmed = true;
+                mYellowBear = 1;
+                LoadGoldenSprite();
+                OctLog("FNAF1: golden freddy armed");
+            }
         }
     }
 }
@@ -2349,6 +2463,8 @@ void FnafGame::UpdateCreepyEnd(float deltaTime)
     }
 
 #if PLATFORM_DOLPHIN
+    // PORT: the original closes the game here. A disc game has nowhere to quit to, so this resets
+    // the console instead.
     OctLog("FNAF1: resetting");
     SYS_ResetSystem(SYS_HOTRESET, 0, 0);
 #else
@@ -2556,6 +2672,10 @@ void FnafGame::UpdateView(float deltaTime)
     // on 3 frames in 10 (only then can Bonnie be seen there), and a hall light drops out 1 frame in
     // 10. Every change means decoding another picture, which costs a GameCube frame or two, so we
     // roll every 100 ms instead.
+    // PORT: two rolls, not one. The original rolls a single Random(10) every frame and reads it
+    // twice — CAM 2A is lit on 3 values in 10, the office light drops out on 1 — so a dropout is
+    // always inside a lit frame. Ours rolls them separately, and at 10 Hz for the reason above, so
+    // the two are uncorrelated.
     mFlickerTimer -= deltaTime;
     if (mFlickerTimer <= 0.0f)
     {
@@ -2757,6 +2877,14 @@ void FnafGame::BuildMenuUi()
     mMenuStaticQuad->SetTexture(mStaticCanvas.GetTexture());
     mMenuStaticQuad->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
 
+    // The "what day" screen lists its blip flash first, so its bands go under the night's name.
+    for (Quad*& band : mBlipBands)
+    {
+        band = mRoot->CreateChild<Quad>("BlipFlash");
+        band->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        band->SetVisible(false);
+    }
+
     // The glitch bars sit above Freddy's face and the static, below the title and the options —
     // the order the title frame lists its objects in.
     for (Quad*& band : mTitleGlitchBands)
@@ -2823,7 +2951,16 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
 
     mMenuBlack->SetVisible(menu || newspaper || intro);
     mMenuBack->SetVisible(menu || newspaper);
-    mMenuStaticQuad->SetVisible(menu || intro);
+    // The "what day" screen has no static of its own — only its blip flash — so the static belongs
+    // to the title alone.
+    mMenuStaticQuad->SetVisible(menu);
+    for (Quad* band : mBlipBands)
+    {
+        if (band != nullptr && !intro)
+        {
+            band->SetVisible(false);
+        }
+    }
     if (mMenuSixth != nullptr)
     {
         mMenuSixth->SetVisible(menu && mBeatGame);
@@ -2923,6 +3060,8 @@ void FnafGame::EnterMenu()
     ShowMenuWidgets(true, false, false);
 
     mMenuMusic.Start("snd/menumusic.pcm", (uint32_t)mCounts["size_menumusic"], true, 0.8f);
+    // PORT: the original plays its title static once and lets it end, leaving the music underneath.
+    // Ours loops (and the converter crossfades the file for it), because that was liked better.
     mMenuHum.Start("snd/menustatic.pcm", (uint32_t)mCounts["size_menustatic"], true, 0.4f);
     OctLog("FNAF1: main menu");
 }
@@ -2939,6 +3078,8 @@ void FnafGame::StartNightIntro()
     mIntroClockText->SetText("12:00 AM");
     mIntroNightText->SetRect(0.0f, mScreenHeight * 0.50f, mScreenWidth, 50.0f);
     mIntroNightText->SetText(kNightNames[glm::clamp(mNight, 1, 6) - 1]);
+    mBlipFrame = 0;
+    mBlipFrameTimer = 0.0f;
     ShowMenuWidgets(false, false, true);
     PlaySound("blip");
 }
@@ -2962,6 +3103,48 @@ static const float kTitleGlitchBands[kTitleGlitchFrames][3][2] = {
     { { 192.0f, 237.0f }, { 271.0f, 280.0f }, {   0.0f,   0.0f } },
     { { 433.0f, 517.0f }, {   0.0f,   0.0f }, {   0.0f,   0.0f } },
 };
+
+// The "what day" screen's blip flash: eleven pictures of white bands at speed 75 (45 fps), restarted
+// the moment it finishes (#0), so it strobes for the whole screen. Rows are in the original's
+// 720-line screen; its first three pictures are the full screen white, which is what gives each
+// loop its hard snap. (0, 0) means that frame has only one band.
+static constexpr int32_t kBlipFrames = 11;
+static constexpr float kBlipFps = 45.0f;
+static const float kBlipBandRows[kBlipFrames][2][2] = {
+    { {   0.0f, 720.0f }, {   0.0f,   0.0f } },
+    { {   0.0f, 720.0f }, {   0.0f,   0.0f } },
+    { {   0.0f, 720.0f }, {   0.0f,   0.0f } },
+    { { 154.0f, 434.0f }, { 436.0f, 521.0f } },
+    { {  98.0f, 378.0f }, { 569.0f, 653.0f } },
+    { { 118.0f, 203.0f }, { 241.0f, 521.0f } },
+    { {   0.0f, 120.0f }, { 497.0f, 582.0f } },
+    { { 258.0f, 343.0f }, { 379.0f, 659.0f } },
+    { { 529.0f, 613.0f }, {   0.0f,   0.0f } },
+    { { 103.0f, 187.0f }, {   0.0f,   0.0f } },
+    { { 433.0f, 517.0f }, {   0.0f,   0.0f } },
+};
+
+void FnafGame::UpdateBlipFlash(float deltaTime)
+{
+    mBlipFrameTimer += deltaTime;
+    if (mBlipFrameTimer >= 1.0f / kBlipFps)
+    {
+        mBlipFrameTimer -= 1.0f / kBlipFps;
+        mBlipFrame = (mBlipFrame + 1) % kBlipFrames;
+    }
+
+    const float scaleY = mScreenHeight / 720.0f;
+    for (int32_t b = 0; b < 2; ++b)
+    {
+        const float top = kBlipBandRows[mBlipFrame][b][0];
+        const float bottom = kBlipBandRows[mBlipFrame][b][1];
+        mBlipBands[b]->SetVisible(bottom > top);
+        if (bottom > top)
+        {
+            mBlipBands[b]->SetRect(0.0f, top * scaleY, mScreenWidth, (bottom - top) * scaleY);
+        }
+    }
+}
 
 void FnafGame::UpdateTitleGlitch(float deltaTime)
 {
@@ -3118,9 +3301,11 @@ void FnafGame::UpdateMenu(float deltaTime)
             if (chosen == 0)
             {
                 // New Game: back to night 1 (the original rewrites its saved level), after the
-                // help-wanted ad.
+                // help-wanted ad. Its frame touches no sound at all, so the title's music carries
+                // on underneath it.
                 mNight = 1;
                 mSavedNight = 1;
+                mMenuTimer = 0.0f;
                 for (bool& played : mCallPlayed)
                 {
                     played = false;     // New Game clears the original's "play voice" counters
@@ -3128,9 +3313,7 @@ void FnafGame::UpdateMenu(float deltaTime)
                 // (New Game rewrites the saved level but leaves both stars alone: its #23 writes
                 // "level" only, and #48's hold-to-wipe is what clears "beatgame" and "beat6".)
                 SaveProgress();
-                StopStreams();
                 mState = State::Newspaper;
-                mMenuTimer = 0.0f;
                 ShowImage(mJumpCanvas, "newspaper", mMenuShown);
                 mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
                 ShowMenuWidgets(false, true, false);
@@ -3154,8 +3337,7 @@ void FnafGame::UpdateMenu(float deltaTime)
         break;
 
     case State::NightIntro:
-        // A burst of static that fades, then the night starts.
-        mMenuStaticQuad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, glm::clamp(1.0f - mMenuTimer * 2.0f, 0.0f, 1.0f)));
+        UpdateBlipFlash(deltaTime);
         if (mMenuTimer >= kNightIntroSeconds)
         {
             StartNight();
@@ -3590,7 +3772,7 @@ void FnafGame::UpdateTabletUi(float deltaTime, bool cameraOn)
     // The usage meter uses the original's five coloured pictures, drawn next to our own
     // "Usage:" text rather than at the original's HUD position.
     const Sprite& usageSprite = mUsageSprites[glm::clamp(mUsage, 1, 5) - 1];
-    mUsageMeter->SetVisible(mState == State::Playing && usageSprite.Get() != nullptr);
+    mUsageMeter->SetVisible(mState == State::Playing && mHudRevealed && usageSprite.Get() != nullptr);
     if (mUsageMeter->IsVisible())
     {
         mUsageMeter->SetTexture(usageSprite.Get());
@@ -3643,8 +3825,10 @@ void FnafGame::UpdateHud()
     const bool hudOn = (mState == State::Playing);
     mTimeText->SetVisible(hudOn);
     mNightText->SetVisible(hudOn);
-    mPowerText->SetVisible(hudOn);
-    mUsageText->SetVisible(hudOn);
+    // Nothing shows the power and usage at the start of a night: they appear when the cameras are
+    // first raised (#5) and only the power-out hides them again, so the night opens without them.
+    mPowerText->SetVisible(hudOn && mHudRevealed);
+    mUsageText->SetVisible(hudOn && mHudRevealed);
 
     if (!playing || !hudOn)
     {

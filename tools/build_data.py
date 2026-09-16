@@ -27,6 +27,10 @@ FFMPEG = os.environ.get("OCTAVE_FFMPEG", r"C:\Users\NoSig\Documents\octave-libog
 
 # Backgrounds are 1600x720 in the original; both sizes must be multiples of 16 for the decoder.
 BG_SIZE = (992, 448)
+# PORT: the original's pictures are 1280x720 (1600x720 for the office) PNGs. Everything here is
+# JPEG at a smaller size, read from the disc and decoded as it is shown — the port's whole picture
+# budget follows from that, so sizes and quality are chosen against decode time and memory rather
+# than to match the source.
 STATIC_SIZE = (320, 176)
 JPEG_QUALITY = 85
 # Foxy's run on CAM 2A: lower quality so each frame is smaller to read over the SD adapter
@@ -101,6 +105,8 @@ MENU_TEXT = {
     "sixth": ("M0003", 781, 977, 227, 44),      # 6th Night (offered once night 5 is beaten)
     # One star picture, drawn twice: the first for beating night 5, the second for night 6.
     "star": ("M0005", 703, 815, 57, 55),
+    # PORT: this crop is 6 px wider than the picture (which is 43x26 at 950, 923), so it carries a
+    # sliver of the neighbouring sprite. Left as it is on purpose.
     "arrows": ("M0004", 944, 923, 54, 26),      # >>
     "copyright": ("M0002", 794, 1000, 224, 14), # (c)2014 Scott Cawthon
     # (The night intro's "12:00 AM / 1st Night", the 6 AM clock and "Game Over" are drawn with the
@@ -289,8 +295,8 @@ DOOR_FRAMES = {
 }
 
 
-# A door takes 0.2 s to close, so at 30 fps only about six of its sixteen pictures can ever be
-# drawn. Every other one is kept (plus the last, so the shut door is the real closed picture),
+# PORT: a door takes 0.2 s to close, so at 30 fps only about six of its sixteen pictures can ever
+# be drawn. Every other one is kept (plus the last, so the shut door is the real closed picture),
 # which halves what these cost in memory and changes nothing on screen.
 DOOR_KEEP = [0, 2, 4, 6, 8, 10, 12, 14, 15]
 
