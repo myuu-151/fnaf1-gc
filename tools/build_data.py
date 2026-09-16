@@ -98,6 +98,7 @@ MENU_TEXT = {
     "title": ("M0001", 4, 762, 202, 212),       # Five Nights at Freddy's
     "newgame": ("M0004", 814, 886, 202, 33),
     "continue": ("M0004", 813, 848, 204, 34),
+    "sixth": ("M0003", 781, 977, 227, 44),      # 6th Night (offered once night 5 is beaten)
     "arrows": ("M0004", 944, 923, 54, 26),      # >>
     "copyright": ("M0002", 794, 1000, 224, 14), # (c)2014 Scott Cawthon
     # (The night intro's "12:00 AM / 1st Night", the 6 AM clock and "Game Over" are drawn with the

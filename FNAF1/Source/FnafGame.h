@@ -251,12 +251,13 @@ private:
     Quad* mMenuContinue = nullptr;
     Quad* mMenuArrows = nullptr;
     Quad* mMenuCopyright = nullptr;
-    Text* mMenuSixthText = nullptr;     // "6th Night", offered once night 5 is beaten
+    Quad* mMenuSixth = nullptr;         // "6th Night", offered once night 5 is beaten
     Text* mIntroClockText = nullptr;    // "12:00 AM" and "1st Night"
     Text* mIntroNightText = nullptr;
     Sprite mMenuTitleSprite;
     Sprite mMenuNewGameSprite;
     Sprite mMenuContinueSprite;
+    Sprite mMenuSixthSprite;
     Sprite mMenuArrowsSprite;
     Sprite mMenuCopyrightSprite;
     std::string mMenuShown;

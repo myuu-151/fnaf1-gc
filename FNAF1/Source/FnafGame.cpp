@@ -298,6 +298,7 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_title.rgx", &mMenuTitleSprite);
     queueSprite("spr/menu_newgame.rgx", &mMenuNewGameSprite);
     queueSprite("spr/menu_continue.rgx", &mMenuContinueSprite);
+    queueSprite("spr/menu_sixth.rgx", &mMenuSixthSprite);
     queueSprite("spr/menu_arrows.rgx", &mMenuArrowsSprite);
     queueSprite("spr/menu_copyright.rgx", &mMenuCopyrightSprite);
     // (The night intro, 6 AM clock and game over are drawn with our own text, not the original's
@@ -1828,8 +1829,8 @@ void FnafGame::UpdateFoxy(float deltaTime)
             SetLight(true, false);
             SetLight(false, false);
         }
-        mOfficePan = 0.0f;      // snap to the left door, where he lunges in
-
+        // (No snap to the door here: if the door is shut he only bangs on it and the view should
+        // stay where you left it. The lunge does its own snap, in UpdateJumpscare.)
         const Door& door = mDoors[0];
         if (mTabletProgress > 0.0f || door.mProgress != (door.mClosed ? 1.0f : 0.0f))
         {
@@ -2660,6 +2661,7 @@ void FnafGame::BuildMenuUi()
     mMenuTitle = mRoot->CreateChild<Quad>("MenuTitle");
     mMenuNewGame = mRoot->CreateChild<Quad>("MenuNewGame");
     mMenuContinue = mRoot->CreateChild<Quad>("MenuContinue");
+    mMenuSixth = mRoot->CreateChild<Quad>("MenuSixth");
     mMenuArrows = mRoot->CreateChild<Quad>("MenuArrows");
     mMenuCopyright = mRoot->CreateChild<Quad>("MenuCopyright");
     // The night intro, the 6 AM clock and the game over label are our own text.
@@ -2672,9 +2674,6 @@ void FnafGame::BuildMenuUi()
         text->SetVisible(false);
         return text;
     };
-    // The original has a "6th night" picture in its atlas; ours is drawn with the game's text,
-    // under Continue and in the same style as the night intro.
-    mMenuSixthText = makeMenuText("MenuSixth", 26.0f);
     mIntroClockText = makeMenuText("IntroClock", 34.0f);
     mIntroNightText = makeMenuText("IntroNight", 34.0f);
     mGameOverLabel = makeMenuText("GameOverLabel", 34.0f);
@@ -2706,9 +2705,9 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
     mMenuBlack->SetVisible(menu || newspaper || intro);
     mMenuBack->SetVisible(menu || newspaper);
     mMenuStaticQuad->SetVisible(menu || intro);
-    if (mMenuSixthText != nullptr)
+    if (mMenuSixth != nullptr)
     {
-        mMenuSixthText->SetVisible(menu && mBeatGame);
+        mMenuSixth->SetVisible(menu && mBeatGame);
     }
 
     for (Quad* quad : { mMenuTitle, mMenuNewGame, mMenuContinue, mMenuArrows, mMenuCopyright })
@@ -2754,8 +2753,9 @@ void FnafGame::EnterMenu()
     PlaceSprite(mMenuNewGame, mMenuNewGameSprite, 175.0f, 400.0f);
     PlaceSprite(mMenuContinue, mMenuContinueSprite, 175.0f, 470.0f);
     LoadProgress();
-    mMenuSixthText->SetRect(175.0f * mScreenWidth / 1280.0f, 540.0f * mScreenHeight / 720.0f, mScreenWidth * 0.5f, 40.0f);
-    mMenuSixthText->SetText("6th Night");
+    // Its object sits at (285, 571) with a (113, 22) hotspot, so its top-left is (172, 549) —
+    // the same left edge as New Game and Continue.
+    PlaceSprite(mMenuSixth, mMenuSixthSprite, 172.0f, 549.0f);
     PlaceSprite(mMenuCopyright, mMenuCopyrightSprite, 1260.0f - mMenuCopyrightSprite.mWidth * 2.0f, 690.0f);
     ShowMenuWidgets(true, false, false);
 
@@ -2827,7 +2827,7 @@ void FnafGame::UpdateMenu(float deltaTime)
             mMenuSelection = (mMenuSelection + options - 1) % options;
             PlaySound("blip");
         }
-        static const float kArrowY[] = { 402.0f, 474.0f, 544.0f };
+        static const float kArrowY[] = { 402.0f, 474.0f, 553.0f };
         PlaceSprite(mMenuArrows, mMenuArrowsSprite, 95.0f, kArrowY[glm::clamp(mMenuSelection, 0, 2)]);
 
         if (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))
