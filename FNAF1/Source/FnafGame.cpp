@@ -965,23 +965,14 @@ void FnafGame::UpdatePlaying(float deltaTime)
 
     if (mState == State::PowerOut)
     {
-        // The original's move rolls (#187, #188) don't check the power, so Bonnie and Chica keep
-        // wandering in the dark, and every move plays their footsteps.
-        for (Animatronic* a : { &mBonnie, &mChica })
+        // Their move rolls (#187, #188) and the rules those feed carry no power condition, so
+        // Bonnie and Chica keep wandering in the dark, footsteps and all — down the same path the
+        // rest of the night uses, one shared move slot included. This used to run its own copy of
+        // the roll, which quietly put them back to moving independently once the lights went out.
+        UpdateAnimatronics(deltaTime);
+        if (mState != State::PowerOut)
         {
-            if (a->mRoom == Room::Office)
-            {
-                continue;
-            }
-            a->mMoveTimer += deltaTime;
-            if (a->mMoveTimer >= a->mMoveInterval)
-            {
-                a->mMoveTimer -= a->mMoveInterval;
-                if ((rand() % 20) + 1 <= GetAi(*a))
-                {
-                    MoveAnimatronic(*a);
-                }
-            }
+            return;     // she took you
         }
 
         UpdateRandomSounds(deltaTime);
