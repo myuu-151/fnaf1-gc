@@ -2254,6 +2254,10 @@ void FnafGame::EndJumpscare()
     SetFade(0.0f);      // the static runs unfaded; the picture after it does the fading in
     mState = State::GameOver;
     mGameOverTimer = 0.0f;
+    // The died screen has the same blip flash as the "what day" one, over its static: eleven
+    // pictures, once, then gone.
+    mBlipFrame = 0;
+    mBlipFrameTimer = 0.0f;
     mGameOverRollTimer = 0.0f;
     mGameOverRare = false;
     mMenuShown.clear();
@@ -2446,6 +2450,10 @@ void FnafGame::StartCreepyEnd()
     OctLog("FNAF1: golden freddy creepy end");
 
     SetFade(0.0f);      // its frame has no transition either
+    for (Quad* band : mBlipBands)
+    {
+        band->SetVisible(false);    // in case this cut in mid-blip on the died screen
+    }
     mState = State::CreepyEnd;
     mCreepyEndTimer = 0.0f;
     mTabletUp = false;
@@ -3567,6 +3575,7 @@ void FnafGame::UpdateGameOver(float deltaTime)
 
     if (mGameOverTimer < kGameOverStaticSeconds)
     {
+        UpdateBlipFlash(deltaTime);     // its bands draw over the static, as that frame orders them
         return;
     }
 
