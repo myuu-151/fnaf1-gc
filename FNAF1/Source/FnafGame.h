@@ -114,6 +114,7 @@ private:
     void PlaceNightReadout();
     void StartNightIntro();
     void ShowMenuWidgets(bool menu, bool newspaper, bool intro);
+    void SetFade(float blackAmount);
     void PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y);
     void UpdateGameOver(float deltaTime);
     void StartWin();
@@ -254,6 +255,7 @@ private:
     Quad* mMenuBlack = nullptr;
     Quad* mMenuBack = nullptr;          // Freddy's face, or the newspaper
     Quad* mMenuStaticQuad = nullptr;
+    Quad* mFadeQuad = nullptr;      // black, over everything: the frames' own fade transitions
     Quad* mMenuTitle = nullptr;
     Quad* mMenuNewGame = nullptr;
     Quad* mMenuContinue = nullptr;

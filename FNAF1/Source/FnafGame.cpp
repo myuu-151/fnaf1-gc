@@ -673,6 +673,7 @@ void FnafGame::StartNight()
     ShowMenuWidgets(false, false, false);
     OctLog("FNAF1: night started");
 
+    SetFade(0.0f);      // whatever screen we came from, the night itself has no transition
     mState = State::Playing;
     mNightTime = 0.0f;
     mHour = 0;
@@ -2149,6 +2150,7 @@ void FnafGame::StartJumpscare(const std::string& who)
         PlaySound("scream");
     }
 
+    SetFade(0.0f);      // the death screens cut, they don't fade
     mState = State::Jumpscare;
     mTabletUp = false;
     mTabletProgress = 0.0f;
@@ -2925,6 +2927,13 @@ void FnafGame::BuildMenuUi()
     mIntroNightText = makeMenuText("IntroNight", 34.0f);
     mGameOverLabel = makeMenuText("GameOverLabel", 34.0f);
 
+    // Created last so it covers everything on these screens: the frames' fade transitions are a
+    // property of the frame, not something its events do, so they cover the text too.
+    mFadeQuad = mRoot->CreateChild<Quad>("Fade");
+    mFadeQuad->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
+    mFadeQuad->SetColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    mFadeQuad->SetVisible(false);
+
     // 6 AM screen: only the digit rolls up behind the black masks; "AM" sits beside it.
     mWinFiveText = makeMenuText("WinFive", 40.0f);
     mWinFiveText->SetHorizontalJustification(Justification::Right);
@@ -3028,6 +3037,7 @@ void FnafGame::EnterMenu()
     AudioManager::StopAllSounds();
     StopStreams();
 
+    SetFade(0.0f);      // the title has no fade of its own
     mState = State::Menu;
     // Continue is picked for you once there's progress to continue (#42/#43).
     mMenuSelection = (mSavedNight > 1) ? 1 : 0;
@@ -3104,12 +3114,15 @@ static const float kTitleGlitchBands[kTitleGlitchFrames][3][2] = {
     { { 433.0f, 517.0f }, {   0.0f,   0.0f }, {   0.0f,   0.0f } },
 };
 
-// The "what day" screen's blip flash: eleven pictures of white bands at speed 75 (45 fps), restarted
-// the moment it finishes (#0), so it strobes for the whole screen. Rows are in the original's
-// 720-line screen; its first three pictures are the full screen white, which is what gives each
-// loop its hard snap. (0, 0) means that frame has only one band.
+// The "what day" screen's blip flash: eleven pictures of white bands at speed 75 (45 fps), played
+// once — about a quarter of a second — and then gone. Its event on "animation finished" stops the
+// animation rather than restarting it, the same action the power-out death's frame uses on Freddy's
+// face; running it as a loop strobes the whole screen for two seconds, which the original doesn't.
+// Rows are in the original's 720-line screen, and its first three pictures are the whole screen
+// white, which is what makes the blip land hard. (0, 0) means that frame has only one band.
 static constexpr int32_t kBlipFrames = 11;
 static constexpr float kBlipFps = 45.0f;
+static constexpr float kBlipAlpha = 1.0f;
 static const float kBlipBandRows[kBlipFrames][2][2] = {
     { {   0.0f, 720.0f }, {   0.0f,   0.0f } },
     { {   0.0f, 720.0f }, {   0.0f,   0.0f } },
@@ -3126,11 +3139,25 @@ static const float kBlipBandRows[kBlipFrames][2][2] = {
 
 void FnafGame::UpdateBlipFlash(float deltaTime)
 {
+    // Once it has played out it stays gone for the rest of the screen.
+    if (mBlipFrame >= kBlipFrames)
+    {
+        for (Quad* band : mBlipBands)
+        {
+            band->SetVisible(false);
+        }
+        return;
+    }
+
     mBlipFrameTimer += deltaTime;
     if (mBlipFrameTimer >= 1.0f / kBlipFps)
     {
         mBlipFrameTimer -= 1.0f / kBlipFps;
-        mBlipFrame = (mBlipFrame + 1) % kBlipFrames;
+        mBlipFrame++;
+        if (mBlipFrame >= kBlipFrames)
+        {
+            return;     // hidden on the next update
+        }
     }
 
     const float scaleY = mScreenHeight / 720.0f;
@@ -3141,6 +3168,7 @@ void FnafGame::UpdateBlipFlash(float deltaTime)
         mBlipBands[b]->SetVisible(bottom > top);
         if (bottom > top)
         {
+            mBlipBands[b]->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, kBlipAlpha));
             mBlipBands[b]->SetRect(0.0f, top * scaleY, mScreenWidth, (bottom - top) * scaleY);
         }
     }
@@ -3213,6 +3241,28 @@ void FnafGame::PlaceNightReadout()
     mMenuNightDigit->SetTexture(digit.Get());
     mMenuNightDigit->SetRect(kMenuNightDigitX * sx, kMenuNightDigitY * sy,
                              kMenuNightDigitW * sx, kMenuNightDigitH * sy);
+}
+
+// The frames' own fade transitions, in milliseconds, read from each frame's transition chunks
+// rather than its events: the help-wanted ad fades in and out over 2 s, the "what day" screen cuts
+// in and fades out over 1010 ms, the game over screen fades in over 1010 ms, and the three ending
+// screens fade both ways over 2 s. (The night, the title and the death screens have none, so they
+// cut.) The 6 AM screen's 1010/900 pair is the same data, and matches what was worked out for it
+// by eye earlier.
+static constexpr float kAdFadeSeconds = 2.0f;
+static constexpr float kIntroFadeOutSeconds = 1.01f;
+static constexpr float kGameOverFadeInSeconds = 1.01f;
+static constexpr float kEndingFadeSeconds = 2.0f;
+
+void FnafGame::SetFade(float blackAmount)
+{
+    const float amount = glm::clamp(blackAmount, 0.0f, 1.0f);
+    mFadeQuad->SetVisible(amount > 0.0f);
+    if (amount > 0.0f)
+    {
+        mFadeQuad->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
+        mFadeQuad->SetColor(glm::vec4(0.0f, 0.0f, 0.0f, amount));
+    }
 }
 
 void FnafGame::UpdateMenu(float deltaTime)
@@ -3315,7 +3365,9 @@ void FnafGame::UpdateMenu(float deltaTime)
                 SaveProgress();
                 mState = State::Newspaper;
                 ShowImage(mJumpCanvas, "newspaper", mMenuShown);
-                mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
+                // Straight up at full strength: its frame is the picture, a 5 s timer and the
+                // skip, with nothing that fades it either way.
+                mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
                 ShowMenuWidgets(false, true, false);
             }
             else
@@ -3328,18 +3380,41 @@ void FnafGame::UpdateMenu(float deltaTime)
     }
 
     case State::Newspaper:
-        // Fades in and stays a few seconds; A or START skips it.
-        mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, glm::clamp(mMenuTimer, 0.0f, 1.0f)));
-        if (mMenuTimer >= kNewspaperSeconds || (mMenuTimer > 0.5f && (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))))
+    {
+        // Fades up over 2 s, sits for its five seconds, then fades out over 2 s. A or START skips
+        // ahead to the fade rather than cutting, which is what leaving the frame early does.
+        const float holdEnd = kAdFadeSeconds + kNewspaperSeconds;
+        if (mMenuTimer < kAdFadeSeconds)
         {
-            StartNightIntro();
+            SetFade(1.0f - mMenuTimer / kAdFadeSeconds);
+        }
+        else if (mMenuTimer < holdEnd)
+        {
+            SetFade(0.0f);
+            if (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))
+            {
+                mMenuTimer = holdEnd;
+            }
+        }
+        else
+        {
+            SetFade((mMenuTimer - holdEnd) / kAdFadeSeconds);
+            if (mMenuTimer >= holdEnd + kAdFadeSeconds)
+            {
+                SetFade(0.0f);
+                StartNightIntro();
+            }
         }
         break;
+    }
 
     case State::NightIntro:
+        // Cuts in, and fades out over its last 1010 ms into the night.
         UpdateBlipFlash(deltaTime);
-        if (mMenuTimer >= kNightIntroSeconds)
+        SetFade(glm::max(0.0f, (mMenuTimer - kNightIntroSeconds) / kIntroFadeOutSeconds));
+        if (mMenuTimer >= kNightIntroSeconds + kIntroFadeOutSeconds)
         {
+            SetFade(0.0f);
             StartNight();
         }
         break;
@@ -3452,8 +3527,28 @@ void FnafGame::StartEnding(const char* image)
 void FnafGame::UpdateEnding(float deltaTime)
 {
     mEndingTimer += deltaTime;
-    if (mEndingTimer >= kEndingSeconds || (mEndingTimer > 1.0f && (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))))
+
+    // The ending frames fade both ways over 2 s.
+    if (mEndingTimer < kEndingFadeSeconds)
     {
+        SetFade(1.0f - mEndingTimer / kEndingFadeSeconds);
+    }
+    else if (mEndingTimer > kEndingSeconds - kEndingFadeSeconds)
+    {
+        SetFade((mEndingTimer - (kEndingSeconds - kEndingFadeSeconds)) / kEndingFadeSeconds);
+    }
+    else
+    {
+        SetFade(0.0f);
+        if (Pressed(GAMEPAD_A) || Pressed(GAMEPAD_START))
+        {
+            mEndingTimer = kEndingSeconds - kEndingFadeSeconds;  // skip ahead to the fade out
+        }
+    }
+
+    if (mEndingTimer >= kEndingSeconds)
+    {
+        SetFade(0.0f);
         EnterMenu();
     }
 }
@@ -3507,6 +3602,10 @@ void FnafGame::UpdateGameOver(float deltaTime)
     // Its frame has no way past it: only the 10 s timer and the rare roll above, so a button press
     // does nothing here.
     const float shown = mGameOverTimer - kGameOverStaticSeconds;
+
+    // Its frame fades in over 1010 ms; there's no fade out, it cuts to the title.
+    SetFade(glm::max(0.0f, 1.0f - shown / kGameOverFadeInSeconds));
+
     if (shown >= kGameOverSeconds)
     {
         if (mGameOverRare)
