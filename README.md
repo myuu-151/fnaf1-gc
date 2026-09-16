@@ -25,10 +25,3 @@ Octave.exe -headless -project <path>/fnaf1-gc/FNAF1/FNAF1.octp -build GameCube
 | `FNAF1/Scripts/Data/` | Converted images, sounds and sprites, packed into the ISO |
 | `tools/build_data.py` | Converts `source/` into that folder |
 | `source/`, `data/` | The original's Clickteam export, and `Application.ccj` with its game logic |
-
-## Notes
-
-- **Memory:** the GameCube's 24 MB is nearly full. Office and camera pictures, Foxy's run and short sounds live in RAM; jumpscare frames are read from the disc as they play, and long sounds are streamed.
-- **Reading from SD:** each streamed sound and the animations read the ISO through their own handle on a background thread, because a seek on FAT costs 50–100 ms.
-- **Logging:** with Octave's local SD logger enabled, the game writes its startup steps, animation timings and a `perf` line every 5 s to `/octiso.log`.
-- **Where it departs from the original:** Foxy's run is stored at lower quality and doesn't get through all its frames on console, since every frame is an SD read and a JPEG decode. With no mouse, the view jumps to the left door when Foxy arrives, and the tablet bar is centred to suit a 4:3 screen.
