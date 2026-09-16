@@ -1509,8 +1509,9 @@ void FnafGame::RaiseTablet()
     mTabletUp = true;
     mTabletUpTime = 0.0f;
     mHudRevealed = true;    // the power and usage displays are shown by the first raise (#5)
+    StopSound("tablet");    // the other half of that shared channel 7
     PlaySound("camup");
-    // Cameras open: the original plays the MiniDV tape sound (stereo, full volume) on its own
+    // Cameras open: the original plays the MiniDV tape sound (full volume) on its own
     // channel and turns the fan's channel down (to 10, from 25).
     mTapeSound.Start("snd/minidv.pcm", (uint32_t)mCounts["size_minidv"], false, 1.0f);
     mFanSound.SetVolume(0.24f);
@@ -1531,8 +1532,14 @@ void FnafGame::LowerTablet()
 
     mTabletUp = false;
     mTabletUpTime = 0.0f;
+    // The original plays the camera-up sound (#129) and the put-down sound (#321) on the same
+    // channel, 7, and starting a sample on a channel stops what was on it - so lowering the tablet
+    // cuts the camera-up recording wherever it had got to. CAMERA_VIDEO_LOA runs 5 s and has knocks
+    // 2.5 s and 4.5 s in, well past the quarter-second flip, and ours played on its own voice: they
+    // carried on over the office after the cameras closed, sounding like the tape had leaked out.
+    StopSound("camup");
     PlaySound("tablet");
-    mTapeSound.Stop();              // the original mutes its channel when the cameras close
+    mTapeSound.Stop();              // #142: the tape's own channel 6 goes to volume 0 on close
     mFanSound.SetVolume(0.6f);
     mCall.SetVolume(2.0f);
     mRandomForPic = (rand() % 100) + 1;   // the original re-rolls "random for pic" as the tablet goes down
@@ -2146,7 +2153,7 @@ void FnafGame::SetLight(bool left, bool on)
     {
         if (!AudioManager::IsSoundPlaying(mSounds["light"].Get<SoundWave>()))
         {
-            PlaySound("light", true, 1.0f);
+            PlaySound("light", true, 2.0f);
         }
     }
     else

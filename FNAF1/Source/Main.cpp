@@ -5,6 +5,7 @@
 
 #include "Engine.h"
 #include "Log.h"
+#include "Renderer.h"
 
 #include "FnafGame.h"
 
@@ -51,6 +52,17 @@ void OctPreInitialize(EngineConfig& config)
 
 void OctPostInitialize()
 {
+    // No log lines drawn over the game. The engine's console widget is created whenever
+    // CONSOLE_ENABLED is set and is only hidden for Windows, Linux and Android release builds, so on
+    // the GameCube it sits in the top-left corner printing everything that goes through LogX - the
+    // startup's "fatInitDefault() failure." among it, over the menu. Hiding the widget stops it
+    // being drawn and nothing else: OctLog still writes the SD diagnostic log, and the engine still
+    // records its own messages.
+    if (Renderer::Get() != nullptr)
+    {
+        Renderer::Get()->EnableConsole(false);
+    }
+
     OctLog("FNAF1: engine initialized, screen %dx%d", GetEngineState()->mWindowWidth, GetEngineState()->mWindowHeight);
     sGame = new FnafGame();
 
