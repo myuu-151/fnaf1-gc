@@ -20,6 +20,13 @@
 #include <ogc/system.h>
 #endif
 
+// The debug keys (START, X, Y, the D-pad's up and down, and the three C-stick directions) are kept
+// in the source but unhooked: set this to 1 to get them back. They exist to reach states a night
+// only reaches by chance - the power-out, each jumpscare, Foxy's run, Golden Freddy - so they are
+// worth keeping around, but they sit on inputs a player can press by accident and every one of them
+// skips straight past the game.
+#define FNAF_DEBUG_KEYS 0
+
 // ---- Deliberate departures from the original -------------------------------------------------
 //
 // This file is written against the original's decoded events, so anything that doesn't match them
@@ -985,6 +992,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
         return;
     }
 
+#if FNAF_DEBUG_KEYS
     // Debug keys: X = power out, Y = Bonnie's jumpscare, D-pad down = Chica's,
     // D-pad up = Bonnie and Chica at the doors, START = complete the night.
     if (Pressed(GAMEPAD_START))
@@ -1073,6 +1081,7 @@ void FnafGame::UpdatePlaying(float deltaTime)
         StartJumpscare("chica");
         return;
     }
+#endif  // FNAF_DEBUG_KEYS
 
     UpdateInput(deltaTime);
     UpdateTablet(deltaTime);
