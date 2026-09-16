@@ -107,6 +107,7 @@ private:
     void EnterMenu();
     void UpdateMenu(float deltaTime);
     void UpdateTitleGlitch(float deltaTime);
+    void PlaceNightReadout();
     void StartNightIntro();
     void ShowMenuWidgets(bool menu, bool newspaper, bool intro);
     void PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y);
@@ -259,6 +260,11 @@ private:
     Sprite mMenuNewGameSprite;
     Sprite mMenuContinueSprite;
     Sprite mMenuSixthSprite;
+    // "Night N" beside Continue, in the original's own lettering and counter digits.
+    Quad* mMenuNightWord = nullptr;
+    Quad* mMenuNightDigit = nullptr;
+    Sprite mMenuNightWordSprite;
+    Sprite mMenuDigitSprites[10];
     // The title's glitch overlay ("blip flash 2"): eight full-screen pictures of white bars, drawn
     // as quads like the camera flash. It shows on a 1-in-3 roll and its transparency is re-rolled
     // several times a second.

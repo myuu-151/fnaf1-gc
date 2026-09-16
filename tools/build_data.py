@@ -400,6 +400,39 @@ def build_map():
     print("usage meter: 5 sprites at 52x20")
 
 
+# Shown beside Continue: the word "Night", and the saved night drawn with the counter's own digit
+# pictures (its definition lists images 187 and 191-199 as 0-9, all 14x17 in one row of M0002).
+# These are small pixel lettering, so unlike the rest of the menu they are NOT scaled: halving a
+# 14x17 glyph and stretching it back turns the 1 into a grey smear and shifts it off the word's
+# baseline. They are padded out to the 4-pixel alignment the texture format needs and kept at
+# their own size, which also means they land exactly where the original draws them.
+MENU_GLYPHS = {
+    "nightword": ("M0001", 411, 934, 63, 22),
+    "digit0": ("M0002", 340, 1003, 14, 17),
+    "digit1": ("M0002", 358, 1003, 14, 17),
+    "digit2": ("M0002", 376, 1003, 14, 17),
+    "digit3": ("M0002", 394, 1003, 14, 17),
+    "digit4": ("M0002", 412, 1003, 14, 17),
+    "digit5": ("M0002", 430, 1003, 14, 17),
+    "digit6": ("M0002", 448, 1003, 14, 17),
+    "digit7": ("M0002", 466, 1003, 14, 17),
+    "digit8": ("M0002", 484, 1003, 14, 17),
+    "digit9": ("M0002", 502, 1003, 14, 17),
+}
+
+
+def build_menu_glyphs():
+    def pad4(v):
+        return (v + 3) // 4 * 4
+
+    for name, (atlas, x, y, w, h) in MENU_GLYPHS.items():
+        im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + w, y + h))
+        padded = Image.new("RGBA", (pad4(w), pad4(h)), (0, 0, 0, 0))
+        padded.paste(im, (0, 0))
+        save_rgx(padded, "menu_" + name)
+    print("menu glyphs: %d unscaled sprites" % len(MENU_GLYPHS))
+
+
 def build_menu_text():
     for name, (atlas, x, y, w, h) in MENU_TEXT.items():
         im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + w, y + h))
@@ -479,6 +512,7 @@ def main():
     build_golden()
     build_map()
     build_menu_text()
+    build_menu_glyphs()
     build_sounds(SOUNDS)
     for name, size in build_sounds(STREAMS).items():
         counts["size_" + name] = size

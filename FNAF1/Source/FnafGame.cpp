@@ -106,6 +106,27 @@ static float GetExtraDrainInterval(int32_t night)
 
 // Main menu timing
 static constexpr float kMenuFrameSeconds = 0.08f;   // Freddy's face frame and flicker
+// "Night N" beside Continue, in the original's own lettering. Both pictures are drawn at their
+// real size rather than through the menu's half-scale path, so these are the original's pixels
+// 1:1 and the placement is exact: measured in the pictures themselves, the word's ink fills its
+// whole 63x22 box (the g reaches the last row) with the N's baseline at row 17, and the digit's
+// ink sits at x 3..11 of its 14x17 box, ending at row 16. Lining the digit's ink bottom up with
+// that baseline, and leaving a 6 px gap after the word, gives the positions below. The stored
+// pictures are padded up to the 4-pixel alignment the texture format needs.
+static constexpr float kMenuNightWordX = 175.0f;
+static constexpr float kMenuNightWordY = 517.0f;
+static constexpr float kMenuNightWordW = 64.0f;     // 63 padded
+static constexpr float kMenuNightWordH = 24.0f;     // 22 padded
+// Horizontally the original's own counter sets the gap: it centres single digits on x 263, which
+// with the glyph's 3 px ink inset starts the number at 259, about 21 px clear of the word rather
+// than the 6 px I first tried (6 px of a 1280-wide screen is only 3 px of the console's 640).
+static constexpr float kMenuNightDigitX = 263.0f - 7.0f;
+static constexpr float kMenuNightDigitY = 517.0f + 17.0f - 16.0f;         // word baseline - digit ink bottom
+static constexpr float kMenuNightDigitW = 16.0f;    // 14 padded
+static constexpr float kMenuNightDigitH = 20.0f;    // 17 padded
+// (The console draws the original's 1280x720 layout on a 640x480 screen, so these come out at half
+// the pixel size the original gives them. Drawing them at one source pixel per screen pixel was
+// tried and looks too big next to Continue, since the rest of the menu is still halved.)
 static constexpr float kNewspaperSeconds = 5.0f;    // help-wanted ad after New Game
 static constexpr float kNightIntroSeconds = 2.5f;   // "12:00 AM / 1st Night"
 static constexpr float kGameOverStaticSeconds = 10.8f;  // static before the game over screen (the static sound's length)
@@ -306,6 +327,13 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_newgame.rgx", &mMenuNewGameSprite);
     queueSprite("spr/menu_continue.rgx", &mMenuContinueSprite);
     queueSprite("spr/menu_sixth.rgx", &mMenuSixthSprite);
+    queueSprite("spr/menu_nightword.rgx", &mMenuNightWordSprite);
+    for (int32_t d = 0; d < 10; ++d)
+    {
+        char digit[32];
+        snprintf(digit, sizeof(digit), "spr/menu_digit%d.rgx", d);
+        queueSprite(digit, &mMenuDigitSprites[d]);
+    }
     queueSprite("spr/menu_arrows.rgx", &mMenuArrowsSprite);
     queueSprite("spr/menu_copyright.rgx", &mMenuCopyrightSprite);
     // (The night intro, 6 AM clock and game over are drawn with our own text, not the original's
@@ -2678,6 +2706,8 @@ void FnafGame::BuildMenuUi()
     mMenuNewGame = mRoot->CreateChild<Quad>("MenuNewGame");
     mMenuContinue = mRoot->CreateChild<Quad>("MenuContinue");
     mMenuSixth = mRoot->CreateChild<Quad>("MenuSixth");
+    mMenuNightWord = mRoot->CreateChild<Quad>("MenuNightWord");
+    mMenuNightDigit = mRoot->CreateChild<Quad>("MenuNightDigit");
     mMenuArrows = mRoot->CreateChild<Quad>("MenuArrows");
     mMenuCopyright = mRoot->CreateChild<Quad>("MenuCopyright");
 
@@ -2728,6 +2758,15 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
     if (mMenuSixth != nullptr)
     {
         mMenuSixth->SetVisible(menu && mBeatGame);
+    }
+
+    // The night readout only belongs to the menu, and only while Continue is picked (its #50/#51).
+    for (Quad* quad : { mMenuNightWord, mMenuNightDigit })
+    {
+        if (quad != nullptr && !menu)
+        {
+            quad->SetVisible(false);
+        }
     }
 
     // The glitch overlay belongs to the title alone: the newspaper and the night intro don't have
@@ -2796,6 +2835,7 @@ void FnafGame::EnterMenu()
     // Its object sits at (285, 571) with a (113, 22) hotspot, so its top-left is (172, 549) —
     // the same left edge as New Game and Continue.
     PlaceSprite(mMenuSixth, mMenuSixthSprite, 172.0f, 549.0f);
+    PlaceNightReadout();
     PlaceSprite(mMenuCopyright, mMenuCopyrightSprite, 1260.0f - mMenuCopyrightSprite.mWidth * 2.0f, 690.0f);
     ShowMenuWidgets(true, false, false);
 
@@ -2893,6 +2933,22 @@ void FnafGame::UpdateTitleGlitch(float deltaTime)
     }
 }
 
+void FnafGame::PlaceNightReadout()
+{
+    // Drawn at their own size in the original's 1280x720 space, so no scaling touches the pixels.
+    const float sx = mScreenWidth / 1280.0f;
+    const float sy = mScreenHeight / 720.0f;
+
+    mMenuNightWord->SetTexture(mMenuNightWordSprite.Get());
+    mMenuNightWord->SetRect(kMenuNightWordX * sx, kMenuNightWordY * sy,
+                            kMenuNightWordW * sx, kMenuNightWordH * sy);
+
+    const Sprite& digit = mMenuDigitSprites[glm::clamp(mSavedNight, 0, 9)];
+    mMenuNightDigit->SetTexture(digit.Get());
+    mMenuNightDigit->SetRect(kMenuNightDigitX * sx, kMenuNightDigitY * sy,
+                             kMenuNightDigitW * sx, kMenuNightDigitH * sy);
+}
+
 void FnafGame::UpdateMenu(float deltaTime)
 {
     mMenuTimer += deltaTime;
@@ -2918,8 +2974,11 @@ void FnafGame::UpdateMenu(float deltaTime)
         if (mMenuFrameTimer <= 0.0f)
         {
             mMenuFrameTimer = kMenuFrameSeconds;
+            // Random(100) every 80 ms, and only three of its hundred values glitch the face: 97
+            // twitches one way, 98 the other, 99 shows the endoskeleton. Everything else is the
+            // normal picture, so each glitch is 1 in 100, not the 3/2/1 we had.
             const int32_t roll = rand() % 100;
-            const int32_t frame = (roll < 94) ? 0 : (roll < 97) ? 1 : (roll < 99) ? 2 : 3;
+            const int32_t frame = (roll == 99) ? 3 : (roll == 98) ? 2 : (roll == 97) ? 1 : 0;
             char name[32];
             snprintf(name, sizeof(name), "menu_freddy%d", frame);
             ShowImage(mJumpCanvas, name, mMenuShown);
@@ -2928,6 +2987,15 @@ void FnafGame::UpdateMenu(float deltaTime)
         }
 
         UpdateTitleGlitch(deltaTime);
+
+        // "Night N" appears next to Continue while it's the highlighted option.
+        const bool showNight = (mMenuSelection == 1);
+        mMenuNightWord->SetVisible(showNight);
+        mMenuNightDigit->SetVisible(showNight);
+        if (showNight)
+        {
+            PlaceNightReadout();
+        }
 
         // New Game, Continue, and the 6th night once night 5 has been beaten (the original's
         // menu grows the same way).
