@@ -86,6 +86,7 @@ BACKGROUNDS = {
     # main menu: Freddy's face (431 normal, 440/441 twitches, 442 the endoskeleton glitch)
     "menu_freddy0": 431, "menu_freddy1": 440, "menu_freddy2": 441, "menu_freddy3": 442,
     "newspaper": 539,               # help-wanted ad shown on New Game
+    "creepystart": 545,             # the 1-in-1000 screen the title rolls for, silent for 9.5 s
     "gameover": 358,                # after the static: Freddy in the backstage room
     # End screens (the original's "the end" frames). Its "next day" frame picks them by the night
     # it has just counted up: 6 -> "the end 2" (the overtime cheque, after night 5), 7 -> "the end
@@ -415,6 +416,9 @@ def build_map():
 # baseline. They are padded out to the 4-pixel alignment the texture format needs and kept at
 # their own size, which also means they land exactly where the original draws them.
 MENU_GLYPHS = {
+    # The pupil that appears in each of Bonnie's eye sockets on the creepy start screen. One 32x32
+    # picture, drawn twice; unscaled for the same reason as the lettering below.
+    "eye": ("M0005", 318, 906, 32, 32),
     "nightword": ("M0001", 411, 934, 63, 22),
     "digit0": ("M0002", 340, 1003, 14, 17),
     "digit1": ("M0002", 358, 1003, 14, 17),

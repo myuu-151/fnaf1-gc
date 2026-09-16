@@ -385,6 +385,7 @@ void FnafGame::QueueLoadJobs()
     queueSprite("spr/menu_continue.rgx", &mMenuContinueSprite);
     queueSprite("spr/menu_sixth.rgx", &mMenuSixthSprite);
     queueSprite("spr/menu_star.rgx", &mMenuStarSprite);
+    queueSprite("spr/menu_eye.rgx", &mCreepyEyeSprite);
     queueSprite("spr/menu_nightword.rgx", &mMenuNightWordSprite);
     for (int32_t d = 0; d < 10; ++d)
     {
@@ -893,7 +894,7 @@ void FnafGame::Update(float deltaTime)
     deltaTime = glm::min(deltaTime, 0.1f);
 
     // Crash breadcrumb: every state change goes to the log.
-    static const char* kStateNames[] = { "Loading", "Menu", "Newspaper", "NightIntro", "Playing", "PowerOut", "Jumpscare", "GameOver", "Win", "CreepyEnd", "Ending" };
+    static const char* kStateNames[] = { "Loading", "Menu", "Newspaper", "NightIntro", "Playing", "PowerOut", "Jumpscare", "GameOver", "Win", "CreepyEnd", "Ending", "CreepyStart" };
     static int32_t sLoggedState = -1;
     if ((int32_t)mState != sLoggedState)
     {
@@ -926,6 +927,10 @@ void FnafGame::Update(float deltaTime)
 
     case State::Ending:
         UpdateEnding(deltaTime);
+        break;
+
+    case State::CreepyStart:
+        UpdateCreepyStart(deltaTime);
         break;
 
     case State::Menu:
@@ -1025,6 +1030,23 @@ void FnafGame::UpdatePlaying(float deltaTime)
         OctLog("FNAF1: debug: golden freddy armed");
     }
     sCStickUpHeld = cStickUp;
+
+    // C-stick left = Freddy's office attack, the one kill that needs him to have walked all the way
+    // round. Fired the way his own roll does it (#408's path): both lights go out first, then the
+    // animation, which runs at 30 fps and holds its scream until picture 7.
+    static bool sCStickLeftHeld = false;
+    const bool cStickLeft = INP_GetGamepadAxisValue(GAMEPAD_AXIS_RTHUMB_X, 0) < -0.6f;
+    if (cStickLeft && !sCStickLeftHeld)
+    {
+        sCStickLeftHeld = true;
+        SetLight(true, false);
+        SetLight(false, false);
+        OctLog("FNAF1: debug: freddy's office attack");
+        StartJumpscare("freddyoffice");
+        return;
+    }
+    sCStickLeftHeld = cStickLeft;
+
     if (Pressed(GAMEPAD_UP))
     {
         for (Animatronic* a : { &mBonnie, &mChica })
@@ -2391,10 +2413,15 @@ void FnafGame::UpdateGoldenFreddy(float deltaTime)
         mYellowBearShown = true;
     }
 
-    // #420, #421: 300 frames (5 s) in the office with him ends the game. #426/#427 hide him while
-    // Bonnie's or Chica's in-office picture is up, and #420 only counts while he is on screen, so
-    // their attack suspends his five seconds.
-    const bool hiddenByAttack = IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office);
+    // #420, #421: 300 frames (5 s) in the office with him ends the game, and #420 only counts while
+    // he is on screen. #426/#427 hide him while the office is showing Bonnie's or Chica's in-office
+    // picture (its animations 35 and 44), which suspends his five seconds — but only while that
+    // picture is genuinely the one up. The events that put it there, #116 and #117, want the
+    // cameras down, both hall lights off and Freddy not in the room; with the other side's light
+    // on, the office shows that lit picture instead and his counter keeps running even though she
+    // is standing inside. Keying this off the room alone suspended him for the wider window.
+    const bool hiddenByAttack = (IsAt(mBonnie, Room::Office) || IsAt(mChica, Room::Office)) &&
+                                !viewing && !mDoors[0].mLight && !mDoors[1].mLight && !mFreddyInOffice;
     if (mYellowBearShown && !hiddenByAttack)
     {
         mYellowBearShownTime += deltaTime;
@@ -2487,6 +2514,73 @@ void FnafGame::UpdateCreepyEnd(float deltaTime)
 #else
     EnterMenu();
 #endif
+}
+
+// The creepy start's frame runs a 10 s timer, and shows its two pupils at 9.5 s.
+static constexpr float kCreepyStartSeconds = 10.0f;
+static constexpr float kCreepyStartEyesSeconds = 9.5f;
+
+void FnafGame::StartCreepyStart()
+{
+    // The 1-in-1000 screen the title rolls for: Bonnie's face on black, in silence (its #1 stops
+    // every sound), with a pupil appearing in each socket near the end.
+    AudioManager::StopAllSounds();
+    StopStreams();
+    OctLog("FNAF1: creepy start");
+
+    mState = State::CreepyStart;
+    mCreepyStartTimer = 0.0f;
+    // Its exit runs the "next day" frame, which adds one to the night counter — so what that
+    // counter holds on the way out of the title matters. The title writes it from whichever option
+    // is highlighted (#28: New Game writes 1, #29: Continue writes the saved level), and the roll
+    // that brings us here runs on that same tick, with the default selection standing.
+    mNight = (mMenuSelection == 1) ? mSavedNight : 1;
+    ShowMenuWidgets(false, true, false);    // its picture on black, the newspaper's layout
+    mMenuShown.clear();
+    ShowImage(mJumpCanvas, "creepystart", mMenuShown);
+    mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    mMenuBack->SetVisible(true);
+    mJump->SetVisible(false);
+    SetFade(0.0f);      // that frame carries no transition: it cuts in and cuts out
+
+    // Its two Actives sit at (510, 192) and (804, 196) with a 15,15 hotspot on a 32x32 picture, so
+    // their top-left corners are (495, 177) and (789, 181) in the original's 1280x720 screen. Like
+    // the night readout's lettering, the picture is stored unscaled and drawn in that space.
+    static const float kEyePos[2][2] = { { 495.0f, 177.0f }, { 789.0f, 181.0f } };
+    const float sx = mScreenWidth / 1280.0f;
+    const float sy = mScreenHeight / 720.0f;
+    for (int32_t i = 0; i < 2; ++i)
+    {
+        mCreepyEyes[i]->SetTexture(mCreepyEyeSprite.Get());
+        mCreepyEyes[i]->SetRect(kEyePos[i][0] * sx, kEyePos[i][1] * sy, 32.0f * sx, 32.0f * sy);
+        mCreepyEyes[i]->SetVisible(false);
+    }
+}
+
+void FnafGame::UpdateCreepyStart(float deltaTime)
+{
+    mCreepyStartTimer += deltaTime;
+
+    // #2: the pupils show at 9.5 s, half a second before the screen ends.
+    if (mCreepyStartTimer >= kCreepyStartEyesSeconds)
+    {
+        for (Quad* eye : mCreepyEyes)
+        {
+            eye->SetVisible(true);
+        }
+    }
+
+    if (mCreepyStartTimer >= kCreepyStartSeconds)
+    {
+        for (Quad* eye : mCreepyEyes)
+        {
+            eye->SetVisible(false);
+        }
+        // #0: at ten seconds it goes on to the "next day" frame — the same one 6 AM leads to. So
+        // this screen isn't only a scare: it counts the night up and runs straight into that night,
+        // without New Game or Continue ever being chosen.
+        StartNextDay();
+    }
 }
 
 std::string FnafGame::GetOfficeImage() const
@@ -2902,6 +2996,14 @@ void FnafGame::BuildMenuUi()
         band->SetVisible(false);
     }
 
+    // The creepy start's two pupils. They sit on that screen's picture and nothing else is on it,
+    // so anywhere above the backdrop will do; here keeps them with the other menu-side quads.
+    for (Quad*& eye : mCreepyEyes)
+    {
+        eye = mRoot->CreateChild<Quad>("CreepyEye");
+        eye->SetVisible(false);
+    }
+
     // The glitch bars sit above Freddy's face and the static, below the title and the options —
     // the order the title frame lists its objects in.
     for (Quad*& band : mTitleGlitchBands)
@@ -2985,6 +3087,15 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
             band->SetVisible(false);
         }
     }
+    // The pupils belong to the creepy start alone, and that screen places and shows them itself.
+    for (Quad* eye : mCreepyEyes)
+    {
+        if (eye != nullptr)
+        {
+            eye->SetVisible(false);
+        }
+    }
+
     if (mMenuSixth != nullptr)
     {
         mMenuSixth->SetVisible(menu && mBeatGame);
@@ -3081,6 +3192,17 @@ void FnafGame::EnterMenu()
     PlaceNightReadout();
     PlaceSprite(mMenuCopyright, mMenuCopyrightSprite, 1260.0f - mMenuCopyrightSprite.mWidth * 2.0f, 690.0f);
     ShowMenuWidgets(true, false, false);
+
+    // #61: the title rolls Random(1000) on the frame it opens, and a 1 goes to the creepy start
+    // instead. Rolled here, so it can come up on any arrival at the title — including the one the
+    // game over screen makes after its ten seconds, which is where it is usually seen. Rolled
+    // before the music starts: that screen silences everything anyway, so starting the two streams
+    // first would only cost a disc read. It never comes back here — its own exit runs into a night.
+    if ((rand() % 1000) == 1)
+    {
+        StartCreepyStart();
+        return;
+    }
 
     mMenuMusic.Start("snd/menumusic.pcm", (uint32_t)mCounts["size_menumusic"], true, 0.8f);
     // PORT: the original plays its title static once and lets it end, leaving the music underneath.
@@ -3637,6 +3759,28 @@ static constexpr float kWinCheerSeconds = 201.0f / 60.0f;  // after the 5 stops,
 static constexpr float kWinFadeInSeconds = 1.01f;
 static constexpr float kWinFadeOutSeconds = 0.9f;
 
+// The original's "next day" frame: it counts the night up and picks where to go next (its #5-#10).
+// Nights 1-4 run into the next one, finishing night 5 pays overtime, and finishing night 6 gets you
+// fired. Its third ending, the $120.00 cheque, belongs to the custom night, which this port doesn't
+// have. Two screens lead here: 6 AM, and the creepy start.
+void FnafGame::StartNextDay()
+{
+    mNight += 1;
+    SaveProgress();
+    if (mNight == 6)
+    {
+        StartEnding("paycheck_overtime");   // $120.50 with overtime
+    }
+    else if (mNight > 6)
+    {
+        StartEnding("fired");               // the notice of termination
+    }
+    else
+    {
+        StartNightIntro();
+    }
+}
+
 void FnafGame::StartWin()
 {
     // Frame start: all sounds stop and the chimes play.
@@ -3720,24 +3864,7 @@ void FnafGame::UpdateWin(float deltaTime)
         alpha = 1.0f - glm::clamp(mWinFadeTime / kWinFadeOutSeconds, 0.0f, 1.0f);
         if (mWinFadeTime >= kWinFadeOutSeconds)
         {
-            // The original's "next day" frame counts the night up and picks where to go next
-            // (its #5-#10): nights 1-4 go straight into the next one, finishing night 5 pays
-            // overtime, and finishing night 6 gets you fired. Its third ending, the $120.00
-            // cheque, belongs to the custom night, which this port doesn't have.
-            mNight += 1;
-            SaveProgress();
-            if (mNight == 6)
-            {
-                StartEnding("paycheck_overtime");   // $120.50 with overtime
-            }
-            else if (mNight > 6)
-            {
-                StartEnding("fired");               // the notice of termination
-            }
-            else
-            {
-                StartNightIntro();
-            }
+            StartNextDay();
             return;
         }
         break;

@@ -53,6 +53,7 @@ private:
         Win,
         CreepyEnd,      // Golden Freddy got you: his face and scream for 1 s, then the GameCube resets
         Ending,         // after the last night: the paycheck (or the termination notice)
+        CreepyStart,    // the 1-in-1000 screen the title rolls for: Bonnie's face, then two eyes
     };
 
     struct Animatronic
@@ -121,6 +122,9 @@ private:
     void UpdateWin(float deltaTime);
     void StartEnding(const char* image);
     void UpdateEnding(float deltaTime);
+    void StartNextDay();
+    void StartCreepyStart();
+    void UpdateCreepyStart(float deltaTime);
     void LoadProgress();
     void SaveProgress();
 
@@ -340,6 +344,9 @@ private:
     bool mBeatSix = false;          // night 6 done: the second star (the original's "beat6")
     Quad* mMenuStars[2] = {};
     Sprite mMenuStarSprite;
+    Quad* mCreepyEyes[2] = {};       // the two pupils, the same picture drawn twice
+    Sprite mCreepyEyeSprite;
+    float mCreepyStartTimer = 0.0f;
     float mEndingTimer = 0.0f;      // the paycheck screen's 15 s
     std::string mEndingImage;
     int32_t mHour = 0;
