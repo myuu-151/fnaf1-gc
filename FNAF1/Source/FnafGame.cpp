@@ -24,11 +24,14 @@
 static constexpr float kOfficeWidth = 1600.0f;
 static constexpr float kOfficeHeight = 720.0f;
 static constexpr float kDoorX[2] = { 72.0f, 1270.0f };
-static constexpr float kDoorWidth[2] = { 223.0f, 229.0f };
+// The pictures' own sizes, not their opaque areas: both doors and the button panels carry
+// transparent margins, and drawing a trimmed crop at the untrimmed origin put them off the
+// doorways and recesses painted into the office.
+static constexpr float kDoorWidth[2] = { 223.0f, 248.0f };
 static constexpr float kButtonX[2] = { 6.0f, 1497.0f };
 static constexpr float kButtonY[2] = { 263.0f, 273.0f };
-static constexpr float kButtonWidth = 57.0f;
-static constexpr float kButtonHeight = 172.0f;
+static constexpr float kButtonWidth = 92.0f;
+static constexpr float kButtonHeight = 247.0f;
 static constexpr float kFanX = 780.0f;
 static constexpr float kFanY = 303.0f;
 static constexpr float kFanWidth = 138.0f;
@@ -40,11 +43,15 @@ static constexpr float kFanHeight = 196.0f;
 static constexpr float kFirstHourSeconds = 90.0f;
 static constexpr float kHourSeconds = 89.0f;
 static constexpr float kDoorSpeed = 5.0f;        // door animation, 1/seconds
-static constexpr float kTabletSpeed = 4.0f;
+// The flip panel's 11 frames run at animation speed 50 (30 fps), so a flip takes 0.367 s.
+static constexpr float kTabletSpeed = 1.0f / 0.367f;
 static constexpr float kPanSpeed = 0.9f;         // office pan, screens/second
 static constexpr float kStaticSeconds = 0.25f;
+// The static's own animation runs at speed 99/100, i.e. a picture per 60 Hz tick. We step it once
+// per frame, which is as close as the console's 30 fps gets.
+static constexpr float kStaticFrameSeconds = 1.0f / 60.0f;
 static constexpr float kJumpFrameSeconds = 1.0f / 24.0f;
-static constexpr float kFanFrameSeconds = 1.0f / 30.0f;
+static constexpr float kFanFrameSeconds = 1.0f / 59.4f;  // its animation speed 99, like Chica's jumpscare
 static constexpr uint64_t kLoadBudgetUs = 30000;  // loading work per frame
 
 // Activity levels, straight from the original's events (#304-#309): each night sets everyone's
@@ -2600,7 +2607,7 @@ void FnafGame::UpdateView(float deltaTime)
         mStaticFrameTimer -= deltaTime;
         if (mStaticFrameTimer <= 0.0f)
         {
-            mStaticFrameTimer = 0.05f;
+            mStaticFrameTimer = kStaticFrameSeconds;
             mStaticFrame = (mStaticFrame + 1) % glm::max(1, mCounts["static"]);
             char name[32];
             snprintf(name, sizeof(name), "static_%02d", mStaticFrame);
@@ -2658,12 +2665,25 @@ void FnafGame::BuildMenuUi()
     mMenuStaticQuad->SetTexture(mStaticCanvas.GetTexture());
     mMenuStaticQuad->SetRect(0.0f, 0.0f, mScreenWidth, mScreenHeight);
 
+    // The glitch bars sit above Freddy's face and the static, below the title and the options —
+    // the order the title frame lists its objects in.
+    for (Quad*& band : mTitleGlitchBands)
+    {
+        band = mRoot->CreateChild<Quad>("TitleGlitch");
+        band->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        band->SetVisible(false);
+    }
+
     mMenuTitle = mRoot->CreateChild<Quad>("MenuTitle");
     mMenuNewGame = mRoot->CreateChild<Quad>("MenuNewGame");
     mMenuContinue = mRoot->CreateChild<Quad>("MenuContinue");
     mMenuSixth = mRoot->CreateChild<Quad>("MenuSixth");
     mMenuArrows = mRoot->CreateChild<Quad>("MenuArrows");
     mMenuCopyright = mRoot->CreateChild<Quad>("MenuCopyright");
+
+    // The scan bar is the last object the title frame lists, so it passes over the text too.
+    mTitleScanBar = mRoot->CreateChild<Quad>("TitleScanBar");
+    mTitleScanBar->SetVisible(false);
     // The night intro, the 6 AM clock and the game over label are our own text.
     auto makeMenuText = [this](const char* name, float size) -> Text*
     {
@@ -2710,6 +2730,20 @@ void FnafGame::ShowMenuWidgets(bool menu, bool newspaper, bool intro)
         mMenuSixth->SetVisible(menu && mBeatGame);
     }
 
+    // The glitch overlay belongs to the title alone: the newspaper and the night intro don't have
+    // it, even though they share these widgets.
+    for (Quad* band : mTitleGlitchBands)
+    {
+        if (band != nullptr && !menu)
+        {
+            band->SetVisible(false);
+        }
+    }
+    if (mTitleScanBar != nullptr)
+    {
+        mTitleScanBar->SetVisible(menu);
+    }
+
     for (Quad* quad : { mMenuTitle, mMenuNewGame, mMenuContinue, mMenuArrows, mMenuCopyright })
     {
         quad->SetVisible(menu);
@@ -2745,6 +2779,12 @@ void FnafGame::EnterMenu()
     mMenuSelection = 0;
     mMenuTimer = 0.0f;
     mMenuFrameTimer = 0.0f;
+    mTitleGlitchFrame = 0;
+    mTitleGlitchFrameTimer = 0.0f;
+    mTitleGlitchRollTimer = 0.0f;
+    mTitleGlitchAlphaTimer = 0.0f;
+    mTitleGlitchOn = false;
+    mTitleScanTime = 0.0f;
     mMenuShown.clear();     // the jumpscare canvas may hold something else now
     mJump->SetVisible(false);
     ShowMessage("");
@@ -2780,6 +2820,79 @@ void FnafGame::StartNightIntro()
     PlaySound("blip");
 }
 
+// The title's glitch overlay: eight pictures of white bars across the whole screen, played as a
+// looping animation at speed 10 (6 fps). Rows are in the original's 720-line screen; a band of
+// (0, 0) means that frame has fewer than three.
+static constexpr int32_t kTitleGlitchFrames = 8;
+static constexpr float kTitleGlitchFps = 6.0f;
+// The scan bar's path: 768 px at 0.625 px per frame (37.5 px/s at 60 fps), then back to the top.
+static constexpr float kTitleScanSpeed = 37.5f;
+static constexpr float kTitleScanTravel = 768.0f;
+static constexpr float kTitleScanAlpha = 0.16f;
+static const float kTitleGlitchBands[kTitleGlitchFrames][3][2] = {
+    { { 182.0f, 218.0f }, {   0.0f,   0.0f }, {   0.0f,   0.0f } },
+    { { 469.0f, 494.0f }, {   0.0f,   0.0f }, {   0.0f,   0.0f } },
+    { {  35.0f,  63.0f }, { 102.0f, 108.0f }, { 467.0f, 539.0f } },
+    { { 206.0f, 320.0f }, { 350.0f, 362.0f }, {   0.0f,   0.0f } },
+    { {  18.0f,  33.0f }, { 194.0f, 206.0f }, { 568.0f, 589.0f } },
+    { { 425.0f, 438.0f }, {   0.0f,   0.0f }, {   0.0f,   0.0f } },
+    { { 192.0f, 237.0f }, { 271.0f, 280.0f }, {   0.0f,   0.0f } },
+    { { 433.0f, 517.0f }, {   0.0f,   0.0f }, {   0.0f,   0.0f } },
+};
+
+void FnafGame::UpdateTitleGlitch(float deltaTime)
+{
+    // Every 300 ms it rolls Random(3) and only shows itself on a 1, and every 80 ms its
+    // transparency is re-rolled to 100 + Random(100) of 255.
+    mTitleGlitchRollTimer += deltaTime;
+    if (mTitleGlitchRollTimer >= 0.3f)
+    {
+        mTitleGlitchRollTimer -= 0.3f;
+        mTitleGlitchOn = (rand() % 3) == 1;
+    }
+
+    mTitleGlitchAlphaTimer += deltaTime;
+    if (mTitleGlitchAlphaTimer >= 0.08f)
+    {
+        mTitleGlitchAlphaTimer -= 0.08f;
+        // 100 + Random(100) is how see-through it is, not how solid: 0 would be opaque and 255
+        // invisible, so the bars sit between 22% and 61% and never read as solid white.
+        mTitleGlitchAlpha = 1.0f - (100.0f + (float)(rand() % 100)) / 255.0f;
+    }
+
+    mTitleGlitchFrameTimer += deltaTime;
+    if (mTitleGlitchFrameTimer >= 1.0f / kTitleGlitchFps)
+    {
+        mTitleGlitchFrameTimer -= 1.0f / kTitleGlitchFps;
+        mTitleGlitchFrame = (mTitleGlitchFrame + 1) % kTitleGlitchFrames;
+    }
+
+    const float scaleY = mScreenHeight / 720.0f;
+
+    // The scan bar: a 1328x32 white band starting just off the top-left at (-19, -38), walking
+    // 768 px down its path at 0.625 px per frame and jumping back to the top, so a pass takes
+    // about 20.5 s. (Its picture is solid white; how see-through the object itself is isn't in
+    // the events, so this alpha is set by eye.)
+    const float scaleX = mScreenWidth / 1280.0f;
+    mTitleScanTime = fmod(mTitleScanTime + deltaTime * kTitleScanSpeed, kTitleScanTravel);
+    mTitleScanBar->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, kTitleScanAlpha));
+    mTitleScanBar->SetRect(-19.0f * scaleX, (-38.0f + mTitleScanTime) * scaleY,
+                           1328.0f * scaleX, 32.0f * scaleY);
+
+    for (int32_t b = 0; b < 3; ++b)
+    {
+        const float top = kTitleGlitchBands[mTitleGlitchFrame][b][0];
+        const float bottom = kTitleGlitchBands[mTitleGlitchFrame][b][1];
+        const bool on = mTitleGlitchOn && bottom > top;
+        mTitleGlitchBands[b]->SetVisible(on);
+        if (on)
+        {
+            mTitleGlitchBands[b]->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, mTitleGlitchAlpha));
+            mTitleGlitchBands[b]->SetRect(0.0f, top * scaleY, mScreenWidth, (bottom - top) * scaleY);
+        }
+    }
+}
+
 void FnafGame::UpdateMenu(float deltaTime)
 {
     mMenuTimer += deltaTime;
@@ -2788,7 +2901,7 @@ void FnafGame::UpdateMenu(float deltaTime)
     mStaticFrameTimer -= deltaTime;
     if (mStaticFrameTimer <= 0.0f)
     {
-        mStaticFrameTimer = 0.05f;
+        mStaticFrameTimer = kStaticFrameSeconds;
         mStaticFrame = (mStaticFrame + 1) % glm::max(1, mCounts["static"]);
         char name[32];
         snprintf(name, sizeof(name), "static_%02d", mStaticFrame);
@@ -2813,6 +2926,8 @@ void FnafGame::UpdateMenu(float deltaTime)
             mMenuBack->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 0.55f + (rand() % 46) / 100.0f));
             mMenuStaticQuad->SetColor(glm::vec4(1.0f, 1.0f, 1.0f, 0.15f + (rand() % 20) / 100.0f));
         }
+
+        UpdateTitleGlitch(deltaTime);
 
         // New Game, Continue, and the 6th night once night 5 has been beaten (the original's
         // menu grows the same way).
@@ -2990,7 +3105,7 @@ void FnafGame::UpdateGameOver(float deltaTime)
     mStaticFrameTimer -= deltaTime;
     if (mStaticFrameTimer <= 0.0f)
     {
-        mStaticFrameTimer = 0.05f;
+        mStaticFrameTimer = kStaticFrameSeconds;
         mStaticFrame = (mStaticFrame + 1) % glm::max(1, mCounts["static"]);
         char name[32];
         snprintf(name, sizeof(name), "static_%02d", mStaticFrame);
@@ -3023,7 +3138,9 @@ void FnafGame::UpdateGameOver(float deltaTime)
     if (mGameOverRollTimer >= 1.0f)
     {
         mGameOverRollTimer -= 1.0f;
-        mGameOverRare = mGameOverRare || (rand() % 10000) == 1;
+        // Each roll replaces the last: its frame tests the counter once, at the 10 s mark, so only
+        // the value standing then counts. Keeping any earlier 1 would make this ten times likelier.
+        mGameOverRare = (rand() % 10000) == 1;
     }
 
     const float shown = mGameOverTimer - kGameOverStaticSeconds;

@@ -121,7 +121,8 @@ JUMPSCARES = {
 # numbers interleave with other animations (e.g. 292 and 302 sit inside Bonnie's).
 FOXY_RUN = [241, 241, 241, 340] + list(range(244, 251)) + [280] + list(range(282, 291)) + [292, 302, 306, 327] + list(range(329, 338))   # 337 = last frame (empty hall)
 STATIC_FRAMES = [12, 13, 14, 15, 16, 17, 18, 20]
-FLIP_FRAMES = [142, 46, 144, 132, 133, 136, 137, 138, 139, 140]
+# The tablet's flip animation, 11 frames (141 is the last and most covering one).
+FLIP_FRAMES = [142, 46, 144, 132, 133, 136, 137, 138, 139, 140, 141]
 
 SOUNDS = {
     # name: (sound number, max seconds or None)
@@ -265,84 +266,82 @@ def opacity(im):
     return sum(1 for v in a.get_flattened_data() if v > 128) / float(64 * 128)
 
 
+# The doors, in the order their closing animation plays: the first picture is the door fully open
+# (what the idle animation shows) and the last is fully shut. Each entry is the picture's exact
+# rectangle in an atlas, read from the original rather than guessed from its opaque area — the
+# pictures carry transparent margins, and trimming them made the drawn door narrower than the
+# doorway painted into the office.
+DOOR_FRAMES = {
+    "l": (223, 720, [
+        ("M0011", 2, 2), ("M0003", 799, 2), ("M0011", 229, 2), ("M0007", 758, 2),
+        ("M0008", 2, 2), ("M0008", 229, 2), ("M0008", 456, 2), ("M0008", 683, 2),
+        ("M0009", 2, 2), ("M0009", 229, 2), ("M0009", 456, 2), ("M0009", 683, 2),
+        ("M0010", 2, 2), ("M0010", 229, 2), ("M0010", 456, 2), ("M0010", 683, 2),
+    ]),
+    "r": (248, 720, [
+        ("M0007", 254, 2), ("M0003", 547, 2), ("M0007", 506, 2), ("M0004", 2, 2),
+        ("M0004", 254, 2), ("M0004", 506, 2), ("M0004", 758, 2), ("M0005", 2, 2),
+        ("M0005", 254, 2), ("M0005", 506, 2), ("M0005", 758, 2), ("M0006", 2, 2),
+        ("M0006", 254, 2), ("M0006", 506, 2), ("M0006", 758, 2), ("M0007", 2, 2),
+    ]),
+}
+
+
+# A door takes 0.2 s to close, so at 30 fps only about six of its sixteen pictures can ever be
+# drawn. Every other one is kept (plus the last, so the shut door is the real closed picture),
+# which halves what these cost in memory and changes nothing on screen.
+DOOR_KEEP = [0, 2, 4, 6, 8, 10, 12, 14, 15]
+
+
 def build_doors():
-    # The door close animations live in atlases. Two sets, told apart by width:
-    # 223 px (left door) and 229 px (right door). Frames are ordered by how much of
-    # the doorway they cover.
-    frames = {223: [], 229: []}
-    for sheet in ["M0003", "M0004", "M0006", "M0007", "M0008", "M0009", "M0010"]:
-        im, boxes = find_sprites(sheet)
-        for (x0, y0, x1, y1) in boxes:
-            w, h = x1 - x0, y1 - y0
-            if h < 600 or w not in frames:
-                continue
-            spr = im.crop((x0, y0, x1, y1))
-            frames[w].append((opacity(spr), spr))
     counts = {}
-    for width, side in ((223, "l"), (229, "r")):
-        ordered = []
-        for op, spr in sorted(frames[width], key=lambda t: t[0]):
-            if ordered and abs(ordered[-1][0] - op) < 0.004:
-                continue
-            ordered.append((op, spr))
-        size = (round4(width * DOOR_HEIGHT / 720.0), DOOR_HEIGHT)
-        for i, (op, spr) in enumerate(ordered):
-            save_rgx(spr.resize(size, Image.LANCZOS), "door_%s_%02d" % (side, i))
-        counts["door_" + side] = len(ordered)
-        print("door %s: %d frames at %dx%d" % (side, len(ordered), size[0], size[1]))
+    for side, (w, h, all_rects) in DOOR_FRAMES.items():
+        rects = [all_rects[i] for i in DOOR_KEEP]
+        size = (round4(w * DOOR_HEIGHT / 720.0), DOOR_HEIGHT)
+        for i, (atlas, x, y) in enumerate(rects):
+            im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + w, y + h))
+            save_rgx(im.resize(size, Image.LANCZOS), "door_%s_%02d" % (side, i))
+        counts["door_" + side] = len(rects)
+        print("door %s: %d frames at %dx%d (from %dx%d)" % (side, len(rects), size[0], size[1], w, h))
     return counts
 
 
+# The door/light button panels: one 92x247 picture per state, per wall. The original picks them
+# with its "door open"/"light on" counters (its #90-#93 and #122-#125), where the door counter is
+# 0 while the door is open. Keyed here as [side][door closed][light on].
+BUTTON_FRAMES = {
+    ("l", 0, 0): ("M0003", 910, 726), ("l", 1, 0): ("M0004", 2, 726),
+    ("l", 0, 1): ("M0004", 98, 726),  ("l", 1, 1): ("M0004", 194, 726),
+    ("r", 0, 0): ("M0004", 386, 726), ("r", 1, 0): ("M0004", 482, 726),
+    ("r", 0, 1): ("M0004", 290, 726), ("r", 1, 1): ("M0003", 814, 726),
+}
+BUTTON_IMAGE = (92, 247)
+# The panels are only about 37 px wide once the office is drawn on a 4:3 screen, so they are
+# stored well under the scale the rest of the office sprites use.
+BUTTON_STORE_SCALE = 0.75
+
+
 def build_buttons():
-    # Door/light button panels (about 58x174): one set of four per wall. Green door
-    # button = door closed, bright light button = light on. The side shows in the
-    # buttons' white edge highlight: on the left edge for the left-wall panel, on
-    # the right edge for the right-wall panel (checked in Dolphin).
-    found = {}
-    for sheet in ["M0004", "M0003"]:
-        im, boxes = find_sprites(sheet)
-        for (x0, y0, x1, y1) in boxes:
-            w, h = x1 - x0, y1 - y0
-            if not (48 <= w <= 72 and 155 <= h <= 190):
-                continue
-            spr = im.crop((x0, y0, x1, y1)).convert("RGBA")
-            rgb = spr.convert("RGB")
-            top = rgb.crop((0, int(h * 0.1), w, int(h * 0.4))).resize((1, 1)).getpixel((0, 0))
-            bottom = rgb.crop((0, int(h * 0.6), w, int(h * 0.9))).resize((1, 1)).getpixel((0, 0))
-            closed = 1 if top[1] > top[0] else 0
-            light = 1 if sum(bottom) / 3.0 > 90 else 0
+    w, h = BUTTON_IMAGE
+    size = (round4(w * BUTTON_SCALE * BUTTON_STORE_SCALE), round4(h * BUTTON_SCALE * BUTTON_STORE_SCALE))
+    for (side, closed, light), (atlas, x, y) in BUTTON_FRAMES.items():
+        im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + w, y + h))
+        save_rgx(im.resize(size, Image.LANCZOS), "btn_%s_c%d_l%d" % (side, closed, light))
+    print("buttons: 8 panels at %dx%d (from %dx%d)" % (size[0], size[1], w, h))
 
-            # Brightest column band across the door button: highlight on the left or right?
-            band = rgb.crop((0, int(h * 0.12), w, int(h * 0.35))).convert("L")
-            columns = [sum(band.getpixel((x, y)) for y in range(band.size[1])) for x in range(w)]
-            left_peak = max(columns[int(w * 0.1):int(w * 0.35)])
-            right_peak = max(columns[int(w * 0.65):int(w * 0.9)])
-            side = "r" if right_peak > left_peak else "l"
 
-            key = "btn_%s_c%d_l%d" % (side, closed, light)
-            if key not in found:
-                found[key] = spr
-                size = (round4(w * BUTTON_SCALE), round4(h * BUTTON_SCALE))
-                save_rgx(spr.resize(size, Image.LANCZOS), key)
-                print("%s from %s at (%d,%d) %dx%d -> %dx%d" % (key, sheet, x0, y0, w, h, size[0], size[1]))
-    expected = ["btn_%s_c%d_l%d" % (s, c, l) for s in "lr" for c in (0, 1) for l in (0, 1)]
-    missing = [k for k in expected if k not in found]
-    if missing:
-        sys.exit("button panels not found: %s" % missing)
+# The office desk fan, drawn over the office at (780, 303): its three pictures at their exact
+# rectangles in M0001 (the middle and last are a pixel narrower than the first).
+FAN_FRAMES = [("M0001", 884, 2, 138, 196), ("M0001", 884, 202, 137, 196), ("M0001", 884, 402, 137, 196)]
 
 
 def build_fan():
-    # The office desk fan: three 138x196 frames in M0001, drawn over the office at (780, 303).
-    im, boxes = find_sprites("M0001")
-    frames = sorted([b for b in boxes if 130 <= b[2] - b[0] <= 145 and 190 <= b[3] - b[1] <= 200], key=lambda b: b[1])
-    if len(frames) != 3:
-        sys.exit("expected 3 fan frames in M0001, found %d" % len(frames))
-    for i, (x0, y0, x1, y1) in enumerate(frames):
-        spr = im.crop((x0, y0, x1, y1))
-        size = (round4((x1 - x0) * BUTTON_SCALE), round4((y1 - y0) * BUTTON_SCALE))
-        save_rgx(spr.resize(size, Image.LANCZOS), "fan_%02d" % i)
-    print("fan: %d frames" % len(frames))
-    return {"fan": len(frames)}
+    size = (round4(138 * BUTTON_SCALE), round4(196 * BUTTON_SCALE))
+    for i, (atlas, x, y, w, h) in enumerate(FAN_FRAMES):
+        im = Image.open(os.path.join(SRC, atlas + ".png")).convert("RGBA").crop((x, y, x + w, y + h))
+        save_rgx(im.resize(size, Image.LANCZOS), "fan_%02d" % i)
+    print("fan: %d frames at %dx%d" % (len(FAN_FRAMES), size[0], size[1]))
+    return {"fan": len(FAN_FRAMES)}
 
 
 def build_golden():

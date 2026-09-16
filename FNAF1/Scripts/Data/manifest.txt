@@ -1,7 +1,7 @@
-door_l 12
+door_l 9
 door_r 9
 fan 3
-flip 10
+flip 11
 foxyrun 33
 jump_bonnie 11
 jump_chica 16

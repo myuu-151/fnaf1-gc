@@ -106,6 +106,7 @@ private:
     void BuildMenuUi();
     void EnterMenu();
     void UpdateMenu(float deltaTime);
+    void UpdateTitleGlitch(float deltaTime);
     void StartNightIntro();
     void ShowMenuWidgets(bool menu, bool newspaper, bool intro);
     void PlaceSprite(Quad* quad, const Sprite& sprite, float x, float y);
@@ -258,6 +259,18 @@ private:
     Sprite mMenuNewGameSprite;
     Sprite mMenuContinueSprite;
     Sprite mMenuSixthSprite;
+    // The title's glitch overlay ("blip flash 2"): eight full-screen pictures of white bars, drawn
+    // as quads like the camera flash. It shows on a 1-in-3 roll and its transparency is re-rolled
+    // several times a second.
+    Quad* mTitleGlitchBands[3] = {};
+    Quad* mTitleScanBar = nullptr;      // the white band crawling down the title (~20 s a pass)
+    float mTitleScanTime = 0.0f;
+    int32_t mTitleGlitchFrame = 0;
+    float mTitleGlitchFrameTimer = 0.0f;
+    float mTitleGlitchRollTimer = 0.0f;
+    float mTitleGlitchAlphaTimer = 0.0f;
+    float mTitleGlitchAlpha = 0.6f;
+    bool mTitleGlitchOn = false;
     Sprite mMenuArrowsSprite;
     Sprite mMenuCopyrightSprite;
     std::string mMenuShown;
